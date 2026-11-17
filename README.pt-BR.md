@@ -14,6 +14,19 @@ docker compose up -d --build
 
 Abra [GridTube](http://localhost:3987). A porta é publicada no loopback por padrão. Para servir outros aparelhos da sua rede de confiança, configure `GRIDTUBE_BIND` com o IP LAN do host. O app é de uso local e esta versão opera sem contas de usuário.
 
+### Escolher o HD e a pasta dos vídeos
+
+Antes de iniciar o GridTube, crie um arquivo `.env` ao lado do `compose.yaml`. Escolha a linha do seu sistema e substitua o endereço pela pasta no computador que roda o Docker.
+
+~~~dotenv
+# Windows
+GRIDTUBE_ARCHIVE_PATH="D:/Geral/GridTube/Videos"
+# Linux ou Orange Pi (use esta linha no Linux)
+# GRIDTUBE_ARCHIVE_PATH=/mnt/hd/GridTube/Videos
+~~~
+
+Os vídeos ficam em `library/` dentro da pasta escolhida. Downloads em andamento e cache ficam em `work/`, no mesmo HD. O caminho padrão do acervo é `./archive`. Para migrar um acervo existente, rode `docker compose stop`, copie o conteúdo da pasta atual do acervo para a nova, ajuste o `.env` e rode `docker compose up -d --wait`.
+
 ### Orange Pi e outros servidores ARM64
 
 Use o mesmo comando do Compose numa instalação Linux de 64 bits com Docker. Na Orange Pi Zero 3, confira se `uname -m` retorna `aarch64`. A placa pode servir a biblioteca pela rede local. Quem decodifica o vídeo é o navegador, e a compatibilidade depende dos codecs que o aparelho usado para assistir suporta.
@@ -28,7 +41,7 @@ Depois de atualizar o código, execute na mesma pasta:
 docker compose up -d --build --wait
 ~~~
 
-O Compose recria o container quando a imagem muda. A biblioteca, o banco e as configurações da aplicação ficam nas pastas montadas `archive/` e `data/`.
+O Compose recria o container quando a configuração ou a imagem muda. A biblioteca fica na pasta do acervo. O banco e as configurações da aplicação ficam em `data/`.
 
 ## Uso
 
@@ -82,13 +95,13 @@ data/
 
 Cada captura publica um MP4 ou WebM com os fluxos baixados da origem. `video.json` registra o modo, os codecs e a resolução. Miniatura e legendas acompanham o vídeo quando disponíveis. A reprodução direta depende do suporte ao formato no navegador ou cliente Jellyfin. O nome da pasta do canal é definido na criação e permanece estável quando o nome exibido é editado. Os arquivos temporários ficam em `archive/work`, fora da biblioteca.
 
-Para levar só a mídia, copie `archive/library` ou as pastas desejadas. Para usar com Jellyfin, monte `archive/library` em modo somente leitura e aponte uma biblioteca do tipo **Vídeos domésticos e fotos** para esse caminho. O app e o Jellyfin mantêm catálogos independentes, incluindo playlists e progresso. Faça o rescan do Jellyfin depois de mover arquivos.
+Para levar só a mídia, copie `library/` dentro da pasta do acervo ou as pastas desejadas. Para usar com Jellyfin, monte essa `library/` em modo somente leitura e aponte uma biblioteca do tipo **Vídeos domésticos e fotos** para esse caminho. O app e o Jellyfin mantêm catálogos independentes, incluindo playlists e progresso. Faça o rescan do Jellyfin depois de mover arquivos.
 
 [Jellyfin e visualização por pastas](https://jellyfin.org/posts/jellyfin-release-12.0/) · [MP4 e convenções de arquivos auxiliares](https://jellyfin.org/docs/general/server/media/music-videos/)
 
 ## Levar para um ambiente off-grid
 
-Com o serviço parado, copie `data/` e `archive/library/` para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
+Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
 docker save -o gridtube-0.7.1.tar gridtube:0.7.1

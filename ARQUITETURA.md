@@ -47,6 +47,8 @@ Cada idioma guarda uma faixa de áudio e uma legenda. Legendas enviadas pelo can
 
 ## Armazenamento e recuperação
 
+O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./archive`. `library/` e `work/` permanecem sob a mesma montagem para que a publicação mova o vídeo da área de trabalho para a biblioteca por renomeação. O banco registra pastas relativas à biblioteca, o que permite trocar o caminho no host copiando o conteúdo do acervo.
+
 - `archive/library` é a biblioteca exportável. Cada pasta de vídeo inclui o MP4 ou WebM, eventuais M4As e VTTs, miniatura e `video.json`. Mover um vídeo para outro canal move o bundle. Playlists referenciam o mesmo vídeo.
 - `data/library.sqlite` guarda canais, catálogo de origem, fila, associações e progresso. O WAL exige cópia consistente do banco. Pare o serviço antes de copiar os diretórios para backup, ou use a API de backup do SQLite para um snapshot só do banco.
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.

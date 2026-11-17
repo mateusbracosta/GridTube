@@ -19,6 +19,19 @@ docker compose up -d --build --wait
 
 Open [GridTube](http://localhost:3987). The default bind address is 127.0.0.1. To use it on a trusted local network, set `GRIDTUBE_BIND` to your host's LAN IP address. `GRIDTUBE_PORT` changes the host port. GridTube currently has no user authentication.
 
+### Choose a drive and folder for your videos
+
+Before starting GridTube, create a `.env` file next to `compose.yaml` and set the archive path on the Docker host. Choose the line for your system and replace the example path.
+
+~~~dotenv
+# Windows
+GRIDTUBE_ARCHIVE_PATH="D:/Geral/GridTube/Videos"
+# Linux or Orange Pi (use this instead on Linux)
+# GRIDTUBE_ARCHIVE_PATH=/mnt/hd/GridTube/Videos
+~~~
+
+Saved videos go in `library/` inside that folder. Working files and playback cache go in `work/` on the same drive. The default archive folder is `./archive`. To migrate an existing installation, run `docker compose stop`, copy the contents of the current archive to the new folder, then set the path and run `docker compose up -d --wait`.
+
 ### ARM64 and small servers
 
 The same Compose command builds GridTube on a 64-bit Docker host, including boards such as the Orange Pi Zero 3 running a 64-bit Linux distribution. `uname -m` should report `aarch64` on the board. Serve the library from the board and play it in a browser on your local network. The browser decodes the video and its codec support determines playback compatibility.
@@ -35,12 +48,12 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 
 From **Organize video → Remove video**, choose **Remove from library** to keep the files and restore the entry later from **Removed**, or **Also delete from disk** to erase the saved bundle. Disk deletion requires a writable archive mount.
 
-GridTube puts videos in `archive/library`, one directory per video, with the MP4 or WebM, a local JSON manifest, and any available sidecars. The `data/` directory holds the database and profile images. Copy `archive/library` to export just the media. To browse the files in Jellyfin, mount that directory read-only and use a Home Videos and Photos library. Direct playback depends on the Jellyfin client and codecs.
+GridTube puts videos in the archive's `library/` folder, one directory per video, with the MP4 or WebM, a local JSON manifest, and any available sidecars. The `data/` directory holds the database and profile images. Copy `library/` to export just the media. To browse the files in Jellyfin, mount that directory read-only and use a Home Videos and Photos library. Direct playback depends on the Jellyfin client and codecs.
 
 ## Update or move the library
 
 Under **Settings → System**, choose **Update yt-dlp** to check the stable PyPI release. GridTube keeps the active version until the new version has passed an import check and the app restarts. Choose **Restart and apply** in Docker when a version is ready. A restart interrupts playback and resumes queued work. The activity log shows recent update results and errors. The installed update is stored in the `data/` volume and survives container recreation.
 
-After updating the source, run the same Docker Compose command. The `data/` and `archive/` directories are bind-mounted and survive container recreation. Stop the service before copying both directories for a full migration. For an offline installation, also bring your Compose file and an image exported with Docker for the target machine's architecture.
+After updating the source, run the same Docker Compose command. The `data/` directory and the archive folder are bind-mounted and survive container recreation. Stop the service before copying both directories for a full migration. For an offline installation, also bring your Compose file and an image exported with Docker for the target machine's architecture.
 
 See the [architecture and operations notes (PT-BR)](ARQUITETURA.md) for storage, API routes, and recovery. GridTube is an independent project inspired by [UnTube](https://github.com/tomfriart/untube).
