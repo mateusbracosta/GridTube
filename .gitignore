@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+/data/
+/archive/
+/Estudo - Untube.md
+*.tar
+Thumbs.db
+.DS_Store

@@ -1,0 +1,18 @@
+services:
+  untube:
+    image: gridtube:0.5.1
+    build: .
+    ports:
+      - "${GRIDTUBE_BIND:-${UNTUBE_BIND:-127.0.0.1}}:${GRIDTUBE_PORT:-${UNTUBE_PORT:-3987}}:8080"
+    environment:
+      DATA_DIR: /data
+      ARCHIVE_DIR: /archive
+    volumes:
+      - ./data:/data
+      - ./archive:/archive
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/state', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
