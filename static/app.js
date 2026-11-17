@@ -19,6 +19,18 @@ const translations = {
   playlist_media_missing: ["Um arquivo da playlist está ausente no acervo.","A playlist file is missing from the archive."],
   playlist_write_failed: ["Não foi possível salvar uma playlist no HD.","Could not save a playlist to disk."],
   publish_incomplete: ["A gravação no acervo foi interrompida. Tente baixar novamente.","Saving to the archive was interrupted. Try downloading again."],
+  libraryCheck: ["Conferir arquivos do acervo","Check archive files"],
+  libraryCheckHelp: ["Use depois de mover uma pasta de vídeo ou excluir um vídeo pelo Nextcloud.","Use after moving a video folder or deleting a video in Nextcloud."],
+  libraryCheckEmpty: ["Nenhuma mudança detectada.","No changes detected."],
+  libraryMoved: ["movidos","moved"],
+  libraryMissing: ["em Removidos","moved to Removed"],
+  libraryRestored: ["restaurados","restored"],
+  libraryAmbiguous: ["com destinos duplicados","with duplicate destinations"],
+  library_reconciled: ["Catálogo atualizado após conferência do acervo","Catalog updated after checking archive files"],
+  library_check_failed: ["Não foi possível conferir o acervo. Verifique se o HD está acessível.","Could not check the archive. Make sure the drive is accessible."],
+  external_media_missing: ["O arquivo sumiu do acervo. Devolva-o à pasta original ou baixe novamente.","The file is missing. Return it to its original folder or download it again."],
+  external_media_returned: ["O arquivo está de volta no acervo. Use Restaurar à biblioteca.","The file is back in the archive. Use Restore to library."],
+  downloadAgain: ["Baixar novamente","Download again"],
   backupTitle: ["Backup e restauração","Backup and restore"],
   backupHelp: ["Exporta o catálogo, as playlists, o progresso e as configurações. Para levar os vídeos, copie a pasta do acervo.","Exports the catalog, playlists, progress and settings. Copy the archive folder to bring the videos."],
   exportBackup: ["Exportar backup","Export backup"],
@@ -501,7 +513,9 @@ function jobProgress(v) {
     <progress max="100" ${known?`value="${v.percent}"`:""} aria-label="${phase}${label?` · ${label}`:""}"></progress></div>`;
 }
 function removedRow(v) {
-  return `<article class="job"><div><strong>${esc(v.title)}</strong></div><aside class="job-actions">
+  const missing = v.error === "external_media_missing";
+  return `<article class="job"><div><strong>${esc(v.title)}</strong>${missing?`<small>${t(v.error)}</small>`:""}</div><aside class="job-actions">
+    ${missing?btn("retry",t("downloadAgain"),"download","",v.id):""}
     ${btn("restoreVideo",t("restoreVideo"),"","",v.id)}${btn("removeVideo",t("deleteMedia"),"","flat",v.id)}</aside></article>`;
 }
 
@@ -521,6 +535,11 @@ function openSettings() {
         <form id="restore-backup-form" class="stack" hidden><p id="backup-preview"></p><p class="note">${t("restoreWarning")}</p>
         <p role="alert"></p><button type="submit">${t("restoreBackup")}</button></form>
         <p id="system-change-status" role="status"></p></section>
+      <section class="system-card"><h3>${t("libraryCheck")}</h3><p class="note">${t("libraryCheckHelp")}</p>
+        <form id="library-check-form" class="stack">
+          <p id="library-check-result" role="status"></p><p role="alert"></p>
+          <button type="submit">${t("libraryCheck")}</button>
+        </form></section>
       <details class="system-card"><summary>${t("resetTitle")}</summary><form id="reset-data-form" class="stack">
         <p class="note">${t("resetHelp")}</p>${checked("disk",t("resetDisk"),false)}
         <label>${t("resetConfirmInput")} <code id="reset-word">RESET</code><input name="confirmation" required maxlength="11" autocomplete="off"></label>
@@ -533,6 +552,15 @@ function openSettings() {
       <section class="system-card"><h3>${t("activityLog")}</h3><div id="system-events"></div></section>
     </div></div>`);
   bind("settings-downloads",async data=>{await api("/settings","PUT",readPrefs(data));await finish();});
+  bind("library-check-form",async ()=>{
+    const output = get("library-check-result");
+    output.textContent = "";
+    const result = await api("/system/library/check","POST",{});
+    const labels = {moved:"libraryMoved",missing:"libraryMissing",restored:"libraryRestored",ambiguous:"libraryAmbiguous"};
+    output.textContent = Object.entries(labels).filter(([key])=>result[key])
+      .map(([key,label])=>`${result[key]} ${t(label)}`).join(" · ") || t("libraryCheckEmpty");
+    await refresh();
+  });
   bind("backup-form",async data=>{
     get("restore-backup-form").hidden = true;
     const preview = await api("/system/backup/preview","POST",data);

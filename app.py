@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 import threading
 import time
@@ -375,7 +376,7 @@ class Archive:
             if source and collector.youtube_url(source, "channel")[0] != source:
                 raise ValueError("backup_invalid")
             if row["state"] == "ready" and not picture.is_file():
-                row["state"] = "removed"
+                row.update(state="removed", error="external_media_missing")
                 return True
         return False
 
@@ -922,7 +923,7 @@ class Archive:
                     logging.warning("Track job failed for %s (%s): %s", track["video_id"], track["code"], error)
                     with self.db() as db:
                         current = db.execute("SELECT state FROM video WHERE id=?", (track["video_id"],)).fetchone()
-                        if not current or current["state"] == "removed":
+                        if not current or current["state"] in {"removed", "queued"}:
                             db.execute("UPDATE track_job SET state='queued' WHERE rowid=?", (track["job_id"],))
                             continue
                         retry_at = timestamp() + exc.seconds if isinstance(exc, collector.TrackRateLimited) else 0
@@ -995,6 +996,96 @@ class Archive:
             raise ValueError("delete_invalid_folder")
         return target
 
+    def archived_picture_exists(self, row):
+        folder = self.video_bundle(row)
+        filename = json.loads(row["metadata"])["filename"]
+        picture = self.playlist_asset(folder, filename)
+        try:
+            return stat.S_ISREG(picture.stat().st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    def find_external_moves(self, channels, missing, occupied):
+        matches = {}
+        for directory, channel_id in channels.items():
+            parent = self.library / directory
+            if parent.resolve() != parent:
+                continue
+            try:
+                folders = list(parent.iterdir())
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            for folder in folders:
+                video_id = folder.name[-12:-1]
+                if video_id not in missing or not folder.name.endswith(f" [{video_id}]"):
+                    continue
+                relative = str(folder.relative_to(self.library))
+                if relative in occupied:
+                    continue
+                row = {**dict(missing[video_id]), "folder": relative}
+                try:
+                    if not self.archived_picture_exists(row):
+                        continue
+                    manifest = self.playlist_asset(folder, "video.json")
+                    with manifest.open(encoding="utf-8") as source:
+                        identity = json.loads(source.read(1024 * 1024))
+                    if (identity.get("id") == video_id
+                            and identity.get("filename") == json.loads(row["metadata"])["filename"]):
+                        matches.setdefault(video_id, []).append((relative, channel_id))
+                except (FileNotFoundError, NotADirectoryError, ValueError, AttributeError):
+                    continue
+        return matches
+
+    def reconcile_library(self):
+        counts = {"moved": 0, "missing": 0, "restored": 0, "ambiguous": 0}
+        playlists = set()
+        with self.files_lock:
+            if self.pending_maintenance.exists():
+                raise ValueError("maintenance_pending")
+            if self.library.resolve() != self.library or not self.library.is_dir():
+                raise ValueError("library_check_failed")
+            with self.db() as db:
+                rows = db.execute("""SELECT id,folder,channel_id,state,error,metadata FROM video
+                    WHERE pending_folder IS NULL AND
+                    (state='ready' OR (state='removed' AND error='external_media_missing'))""").fetchall()
+                missing = {}
+                changes = []
+                for row in rows:
+                    if self.exporting[row["id"]]:
+                        continue
+                    if not self.archived_picture_exists(row):
+                        missing[row["id"]] = row
+                    elif row["state"] == "removed":
+                        changes.append((row, row["folder"], row["channel_id"], "restored"))
+                if missing:
+                    channels = {row["folder"]: row["id"] for row in db.execute("SELECT id,folder FROM channel")}
+                    channels["Avulsos"] = None
+                    occupied = {str(Path(row["folder"])) for row in db.execute(
+                        "SELECT folder FROM video WHERE folder IS NOT NULL")}
+                    matches = self.find_external_moves(channels, missing, occupied)
+                    for video_id, row in missing.items():
+                        destinations = matches.get(video_id, [])
+                        if len(destinations) == 1:
+                            folder, channel_id = destinations[0]
+                            changes.append((row, folder, channel_id, "moved"))
+                        else:
+                            counts["ambiguous"] += int(len(destinations) > 1)
+                            if row["state"] == "ready":
+                                changes.append((row, row["folder"], row["channel_id"], "missing"))
+                for row, folder, channel_id, action in changes:
+                    state, error = ("removed", "external_media_missing") if action == "missing" else ("ready", None)
+                    db.execute("UPDATE video SET folder=?,channel_id=?,state=?,error=? WHERE id=?",
+                               (folder, channel_id, state, error, row["id"]))
+                    playlists.update(item[0] for item in db.execute(
+                        "SELECT playlist_id FROM playlist_item WHERE video_id=?", (row["id"],)))
+                    counts[action] += 1
+                if changes:
+                    system_event(db, "library", "library_reconciled", str(len(changes)))
+            self.refresh_playlist_files(sorted(playlists))
+        if changes:
+            self.changed.set()
+        return counts
+
     def remove_video(self, video_id, disk):
         if not collector.VIDEO_ID.fullmatch(video_id):
             abort(404)
@@ -1057,7 +1148,7 @@ class Archive:
                     abort(404)
                 if not (self.video_bundle(row) / json.loads(row["metadata"])["filename"]).is_file():
                     raise ValueError("restore_media_missing")
-                db.execute("UPDATE video SET state='ready' WHERE id=?", (video_id,))
+                db.execute("UPDATE video SET state='ready',error=NULL WHERE id=?", (video_id,))
             self.refresh_video_playlists(video_id)
         self.changed.set()
 
@@ -1178,6 +1269,15 @@ def create_app(data=None, root=None, workers=True):
             events = [dict(row) for row in db.execute("SELECT * FROM system_event ORDER BY id DESC LIMIT 50")]
         return jsonify(yt_dlp=archive.dependency_status(), events=events,
                        maintenance_pending=archive.pending_maintenance.exists())
+
+    @app.post("/api/system/library/check")
+    def check_library():
+        local_change()
+        try:
+            return jsonify(archive.reconcile_library())
+        except (OSError, KeyError, TypeError, RuntimeError):
+            logging.exception("Could not check the archive files")
+            return jsonify(error="library_check_failed"), 409
 
     @app.get("/api/system/backup")
     def backup_catalog():
@@ -1564,12 +1664,19 @@ def create_app(data=None, root=None, workers=True):
 
     @app.post("/api/videos/<video_id>/retry")
     def retry(video_id):
+        check_origin()
         data = body() if request.is_json else {}
-        with archive.db() as db:
+        with archive.files_lock, archive.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM video WHERE id=? AND state='failed'", (video_id,)).fetchone()
+            row = db.execute("""SELECT * FROM video WHERE id=? AND
+                (state='failed' OR (state='removed' AND error='external_media_missing'))""", (video_id,)).fetchone()
             if not row:
                 abort(404)
+            if row["state"] == "removed":
+                if archive.archived_picture_exists(row):
+                    raise ValueError("external_media_returned")
+                db.execute("""UPDATE track_job SET state='queued',resolved=NULL,error=NULL,retry_at=0
+                    WHERE video_id=? AND state='ready'""", (video_id,))
             overrides = (capture_preferences(data["overrides"]) if "overrides" in data
                          else json.loads(row["capture_overrides"]))
             prefs = {**archive.effective(db, archive.channel(db, row["channel_id"])), **overrides}
@@ -1636,7 +1743,9 @@ def create_app(data=None, root=None, workers=True):
             meta = json.loads(row["metadata"])
             if asset not in {meta["filename"], meta.get("thumbnail"), *meta.get("subtitles", {}).values()}:
                 abort(404)
-            return send_from_directory(archive.library / row["folder"], asset, conditional=True)
+            folder = archive.video_bundle(row)
+            archive.playlist_asset(folder, asset)
+            return send_from_directory(folder, asset, conditional=True)
 
     return app
 

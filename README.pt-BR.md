@@ -101,13 +101,21 @@ Cada playlist tem um `playlist.m3u8` em UTF-8 na pasta `Playlists/` do acervo. C
 
 [Jellyfin e visualização por pastas](https://jellyfin.org/posts/jellyfin-release-12.0/) · [MP4 e convenções de arquivos auxiliares](https://jellyfin.org/docs/general/server/media/music-videos/)
 
+### Acessar o acervo pelo Nextcloud
+
+Aponte o armazenamento externo local do Nextcloud para a subpasta `library/` do acervo e dê à montagem o nome **Videos**. Downloads em andamento e cache ficam em `work/`, fora dessa montagem. Para baixar uma cópia pelo Nextcloud, basta baixar o arquivo ou a pasta desejada.
+
+Depois de excluir um vídeo ou mover sua pasta pelo Nextcloud, abra **Configurações → Sistema → Conferir arquivos do acervo** no GridTube. Para mover entre canais que já têm pasta no acervo, mova a pasta inteira do vídeo, mantendo `[ID]` no nome e o arquivo `video.json` junto da mídia. Mover só o MP4 ou WebM para fora da pasta original fará o vídeo aparecer em **Removidos**.
+
+O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentação. Quando a mídia desaparece, guarda o progresso e as associações em **Removidos**. Para recuperar, devolva o arquivo à pasta original e confira o acervo novamente, ou use **Baixar novamente**. A conferência atualiza o catálogo sem apagar arquivos no HD.
+
 ## Levar para um ambiente off-grid
 
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.3.tar gridtube:0.7.3
-docker load -i gridtube-0.7.3.tar
+docker save -o gridtube-0.7.4.tar gridtube:0.7.4
+docker load -i gridtube-0.7.4.tar
 docker compose up -d --no-build --pull never
 ~~~
 

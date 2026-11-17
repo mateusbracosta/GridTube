@@ -52,6 +52,14 @@ GridTube puts videos in the archive's `library/` folder, one directory per video
 
 Each playlist also has a UTF-8 `playlist.m3u8` in the archive's `Playlists/` directory. Copy `library/` and `Playlists/` together to retain the relative paths. For a single playlist, use **Export playlist as ZIP** in its header. The archive contains the playlist, videos and available sidecars with paths relative to the extracted folder.
 
+### Access the archive from Nextcloud
+
+Point Nextcloud local external storage at the archive's `library/` directory and name the mount **Videos**. This keeps partial downloads and playback cache outside the Nextcloud mount. You can download copies directly from Nextcloud.
+
+After deleting a video or moving its folder in Nextcloud, open **Settings → System → Check archive files** in GridTube. When moving a video between channel directories already in the archive, move its entire folder, retaining the `[ID]` suffix and the `video.json` manifest. Moving only the MP4 or WebM out of its folder puts the video in **Removed**.
+
+GridTube updates paths and playlists for recognized moves. When the media is missing, it keeps progress and playlist memberships under **Removed**. To recover, return the file to its original folder and check again, or select **Download again**. The check updates the catalog and leaves the files on disk.
+
 ### Backup, restore and clear app data
 
 Under **Settings → System**, export a catalog backup as `gridtube-backup.jsonl`. It includes channels, playlists, video records, download jobs, watch progress and preferences. The media files stay in the archive. To move to a new host, copy the archive and preview the backup before applying it. Missing videos appear in **Removed** and can be restored after copying their files.
