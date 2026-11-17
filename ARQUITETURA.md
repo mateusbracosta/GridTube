@@ -50,6 +50,7 @@ Cada idioma guarda uma faixa de áudio e uma legenda. Legendas enviadas pelo can
 O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./archive`. `library/` e `work/` permanecem sob a mesma montagem para que a publicação mova o vídeo da área de trabalho para a biblioteca por renomeação. O banco registra pastas relativas à biblioteca, o que permite trocar o caminho no host copiando o conteúdo do acervo.
 
 - `archive/library` é a biblioteca exportável. Cada pasta de vídeo inclui o MP4 ou WebM, eventuais M4As e VTTs, miniatura e `video.json`. Mover um vídeo para outro canal move o bundle. Playlists referenciam o mesmo vídeo.
+- `archive/Playlists/<nome> [ID]/playlist.m3u8` reflete a ordem de exibição do app e referencia `library/` por caminho relativo. O ZIP de uma playlist transmite os arquivos em blocos com ZIP64 e `ZIP_STORED`. Mover ou excluir do disco um vídeo incluído aguarda o fim da transmissão para proteger o arquivo em curso.
 - `data/library.sqlite` guarda canais, catálogo de origem, fila, associações e progresso. O WAL exige cópia consistente do banco. Pare o serviço antes de copiar os diretórios para backup, ou use a API de backup do SQLite para um snapshot só do banco.
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.
 - `archive/work` guarda arquivos de trabalho e variantes derivadas. O app retoma jobs que ficaram em execução após reiniciar. Na publicação e na movimentação, registra o destino pretendido no SQLite antes de renomear a pasta.
@@ -58,6 +59,8 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 - Para restaurar o conjunto, recupere `data/`, `archive/library/`, o Compose e a imagem da mesma arquitetura. Aponte o Jellyfin para `archive/library` em modo somente leitura. O índice do Jellyfin é independente.
 
 ## API e verificação
+
+`GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 
 A biblioteca usa `GET /api/videos?summary=1` para carregar somente os dados dos cartões. `GET /api/videos` e a rota individual de faixas preservam os metadados completos. O catálogo dispensa comparações de texto ao listar sem filtro. Na interface, consultas de fundo são pausadas com a aba oculta e espaçadas quando a biblioteca ou o player estão sem atividade. A captura gera a miniatura com um único thread do FFmpeg.
 

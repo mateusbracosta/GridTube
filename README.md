@@ -50,6 +50,14 @@ From **Organize video → Remove video**, choose **Remove from library** to keep
 
 GridTube puts videos in the archive's `library/` folder, one directory per video, with the MP4 or WebM, a local JSON manifest, and any available sidecars. The `data/` directory holds the database and profile images. Copy `library/` to export just the media. To browse the files in Jellyfin, mount that directory read-only and use a Home Videos and Photos library. Direct playback depends on the Jellyfin client and codecs.
 
+Each playlist also has a UTF-8 `playlist.m3u8` in the archive's `Playlists/` directory. Copy `library/` and `Playlists/` together to retain the relative paths. For a single playlist, use **Export playlist as ZIP** in its header. The archive contains the playlist, videos and available sidecars with paths relative to the extracted folder.
+
+### Backup, restore and clear app data
+
+Under **Settings → System**, export a catalog backup as `gridtube-backup.jsonl`. It includes channels, playlists, video records, download jobs, watch progress and preferences. The media files stay in the archive. To move to a new host, copy the archive and preview the backup before applying it. Missing videos appear in **Removed** and can be restored after copying their files.
+
+**Clear app data** resets the catalog, preferences and generated files. The default confirmation is `RESET` and keeps the media in `library/`. With disk deletion selected, type `RESET MEDIA` to also erase that library. Restore and reset apply when the service restarts.
+
 ## Update or move the library
 
 Under **Settings → System**, choose **Update yt-dlp** to check the stable PyPI release. GridTube keeps the active version until the new version has passed an import check and the app restarts. Choose **Restart and apply** in Docker when a version is ready. A restart interrupts playback and resumes queued work. The activity log shows recent update results and errors. The installed update is stored in the `data/` volume and survives container recreation.

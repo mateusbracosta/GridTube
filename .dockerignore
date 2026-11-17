@@ -4,5 +4,7 @@
 !app.py
 !collector.py
 !dependencies.py
+!playlist_files.py
+!catalog_backup.py
 !static/
 !static/**

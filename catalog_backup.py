@@ -1,0 +1,59 @@
+import json
+import sqlite3
+from contextlib import closing
+
+
+FORMAT = {"format": "gridtube-catalog", "version": 1}
+TABLES = ("settings", "channel", "channel_description", "playlist", "video", "playlist_item", "seen", "track_job")
+CACHE_TABLES = ("playlist_entry", "source_playlist", "entry", "scan", "channel_profile", "system_event")
+LINE_LIMIT = 1024 * 1024
+
+
+def export_lines(db):
+    db.execute("BEGIN")
+    yield json.dumps(FORMAT) + "\n"
+    for table in TABLES:
+        for row in db.execute(f"SELECT * FROM {table} ORDER BY rowid"):
+            yield json.dumps({"table": table, "row": dict(row)}, ensure_ascii=False) + "\n"
+    yield '{"end":true}\n'
+
+
+def load_backup(upload, target, schema, validate):
+    counts = {"channel": 0, "playlist": 0, "video": 0, "missing": 0}
+    with closing(sqlite3.connect(target)) as db, db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.executescript(schema)
+        columns = {table: [row[1] for row in db.execute(f"PRAGMA table_info({table})")] for table in TABLES}
+        commands = {table: f"INSERT INTO {table} ({','.join(names)}) VALUES ({','.join('?' for _ in names)})"
+                    for table, names in columns.items()}
+        if json.loads(upload.readline(LINE_LIMIT + 1)) != FORMAT:
+            raise ValueError("backup_invalid")
+        while line := upload.readline(LINE_LIMIT + 1):
+            if len(line) > LINE_LIMIT:
+                raise ValueError("backup_invalid")
+            record = json.loads(line)
+            if record == {"end": True}:
+                if upload.read(1) or db.execute("SELECT count(*) FROM settings").fetchone()[0] != 1:
+                    raise ValueError("backup_invalid")
+                return counts
+            table, row = record["table"], record["row"]
+            if table not in columns or not isinstance(row, dict) or set(row) != set(columns[table]):
+                raise ValueError("backup_invalid")
+            if validate(table, row):
+                counts["missing"] += 1
+            db.execute(commands[table], [row[name] for name in columns[table]])
+            if table in counts:
+                counts[table] += 1
+        raise ValueError("backup_invalid")
+
+
+def replace_catalog(db, candidate=None):
+    if candidate is not None:
+        db.execute("ATTACH DATABASE ? AS restored", (str(candidate),))
+    db.execute("BEGIN IMMEDIATE")
+    for table in (*CACHE_TABLES, *reversed(TABLES)):
+        db.execute(f"DELETE FROM {table}")
+    if candidate is not None:
+        for table in TABLES:
+            columns = ",".join(row[1] for row in db.execute(f"PRAGMA main.table_info({table})"))
+            db.execute(f"INSERT INTO main.{table} ({columns}) SELECT {columns} FROM restored.{table}")

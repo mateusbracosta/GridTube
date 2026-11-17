@@ -14,6 +14,30 @@ const translations = {
   playlists: ["Playlists","Playlists"],
   settings: ["Configurações","Settings"],
   system: ["Sistema","System"],
+  exportPlaylist: ["Exportar playlist em ZIP","Export playlist as ZIP"],
+  playlist_export_busy: ["Este vídeo está em uma exportação. Tente novamente quando ela terminar.","This video is part of an export. Try again when it finishes."],
+  playlist_media_missing: ["Um arquivo da playlist está ausente no acervo.","A playlist file is missing from the archive."],
+  playlist_write_failed: ["Não foi possível salvar uma playlist no HD.","Could not save a playlist to disk."],
+  backupTitle: ["Backup e restauração","Backup and restore"],
+  backupHelp: ["Exporta o catálogo, as playlists, o progresso e as configurações. Para levar os vídeos, copie a pasta do acervo.","Exports the catalog, playlists, progress and settings. Copy the archive folder to bring the videos."],
+  exportBackup: ["Exportar backup","Export backup"],
+  importBackup: ["Arquivo de backup do GridTube","GridTube backup file"],
+  previewBackup: ["Conferir backup","Preview backup"],
+  restoreBackup: ["Restaurar este backup","Restore this backup"],
+  restoreWarning: ["A restauração substitui os dados atuais do app.","Restoring replaces the app's current data."],
+  backupMissingFiles: ["vídeos com arquivo ausente ficarão em Removidos","videos with missing files will go to Removed"],
+  backup_invalid: ["O arquivo não é um backup válido do GridTube.","This is not a valid GridTube backup."],
+  backup_preview_missing: ["Confira o backup novamente antes de restaurar.","Preview the backup again before restoring it."],
+  backup_restored: ["Backup restaurado.","Backup restored."],
+  resetTitle: ["Limpar dados do app","Clear app data"],
+  resetHelp: ["Limpa catálogo, fila, progresso e preferências. Marque a opção abaixo para apagar também os vídeos do acervo.","Clears the catalog, queue, progress and settings. Select the option below to also delete the archived videos."],
+  resetDisk: ["Apagar vídeos e arquivos auxiliares do HD","Delete videos and their sidecar files from disk"],
+  resetConfirmInput: ["Digite para confirmar","Type to confirm"],
+  reset_confirmation_invalid: ["Confira o texto da confirmação.","Check the confirmation text."],
+  maintenance_pending: ["Uma operação aguarda o reinício do GridTube.","An operation is waiting for GridTube to restart."],
+  maintenanceManual: ["Reinicie o GridTube para aplicar a operação.","Restart GridTube to apply the operation."],
+  maintenance_failed: ["A operação de Sistema não terminou. Veja o registro de atividade.","The system operation did not finish. Check the activity log."],
+  data_reset: ["Dados do app limpos.","App data cleared."],
   activeVersion: ["Versão em uso","Active version"],
   bundledVersion: ["Versão da imagem","Bundled version"],
   updateDependency: ["Atualizar yt-dlp","Update yt-dlp"],
@@ -225,7 +249,9 @@ const duration = seconds => seconds > 0
 const btn = (action, text, glyph, css="", value="") => `<button type="button" data-action="${action}" data-value="${esc(value)}" class="${css}" aria-label="${esc(text)}" title="${esc(text)}">${glyph?icon(glyph):""}${css.includes("icon-only")?"":` <span>${esc(text)}</span>`}</button>`;
 
 async function api(path, method="GET", data) {
-  const res = await fetch(`/api${path}`, {method,cache:"no-store",...(data===undefined?{}:{headers:{"Content-Type":"application/json"},body:JSON.stringify(data)})});
+  const payload = data instanceof FormData ? {body:data} : data===undefined ? {} :
+    {headers:{"Content-Type":"application/json"},body:JSON.stringify(data)};
+  const res = await fetch(`/api${path}`, {method,cache:"no-store",...payload});
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || "error");
   return res.json();
 }
@@ -440,7 +466,8 @@ async function loadLibrary() {
       <div class="hero-content"><h1>${esc(hero?.title||t("title"))}</h1><p>${esc(hero?.source_channel||t(hero?"recent":"intro"))}</p>
       ${hero?btn("watch",t("play"),"play","accent",hero.id):btn("addChannel",t("addChannel"),"plus","accent")}
       </div></section><div class="section-head"><h2>${t("recent")}</h2></div>` :
-      channel ? channelPage(channel,actions) : `<div class="page-head"><h1>${esc(title)}</h1></div>`;
+      channel ? channelPage(channel,actions) : `<div class="page-head"><h1>${esc(title)}</h1>${playlist?
+        `<a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
     const isQueue = scope==="downloads", isRemoved = scope==="removed";
     const results = videos.length
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
@@ -486,6 +513,18 @@ function openSettings() {
     <form id="settings-downloads" class="stack"><h3>${t("defaults")}</h3>${prefs(state.settings,false)}
       <p role="alert"></p><button class="accent" type="submit">${t("save")}</button></form>
     <div id="settings-system" class="stack" hidden>
+      <section class="system-card"><h3>${t("backupTitle")}</h3><p class="note">${t("backupHelp")}</p>
+        <div class="system-actions"><a class="accent" href="/api/system/backup" download>${t("exportBackup")}</a></div>
+        <form id="backup-form" class="stack"><label>${t("importBackup")}<input name="backup" type="file" accept=".jsonl" required></label>
+        <p role="alert"></p><button type="submit">${t("previewBackup")}</button></form>
+        <form id="restore-backup-form" class="stack" hidden><p id="backup-preview"></p><p class="note">${t("restoreWarning")}</p>
+        <p role="alert"></p><button type="submit">${t("restoreBackup")}</button></form>
+        <p id="system-change-status" role="status"></p></section>
+      <details class="system-card"><summary>${t("resetTitle")}</summary><form id="reset-data-form" class="stack">
+        <p class="note">${t("resetHelp")}</p>${checked("disk",t("resetDisk"),false)}
+        <label>${t("resetConfirmInput")} <code id="reset-word">RESET</code><input name="confirmation" required maxlength="11" autocomplete="off"></label>
+        <p role="alert"></p><button type="submit" class="accent">${t("resetTitle")}</button>
+      </form></details>
       <section class="system-card"><h3>yt-dlp</h3><p class="note">${t("dependencyHelp")}</p>
         <p id="dependency-status" role="status"></p><p id="dependency-error" role="alert"></p>
         <div class="system-actions">${btn("updateDependency",t("updateDependency"),"","accent")}
@@ -493,9 +532,35 @@ function openSettings() {
       <section class="system-card"><h3>${t("activityLog")}</h3><div id="system-events"></div></section>
     </div></div>`);
   bind("settings-downloads",async data=>{await api("/settings","PUT",readPrefs(data));await finish();});
+  bind("backup-form",async data=>{
+    get("restore-backup-form").hidden = true;
+    const preview = await api("/system/backup/preview","POST",data);
+    const summary = `${preview.channel} ${t("channels").toLowerCase()} · ${preview.playlist} ${t("playlists").toLowerCase()} · ${preview.video} ${t("videos").toLowerCase()}`;
+    get("backup-preview").textContent = preview.missing ? `${summary}. ${preview.missing} ${t("backupMissingFiles")}.` : summary;
+    const confirmation = get("restore-backup-form");
+    confirmation.hidden = false;
+    bind("restore-backup-form",()=>applySystemChange("/system/backup/restore",{token:preview.token}));
+  });
+  const reset = get("reset-data-form");
+  reset.elements.disk.onchange = () => {
+    get("reset-word").textContent = reset.elements.disk.checked ? "RESET MEDIA" : "RESET";
+    reset.elements.confirmation.value = "";
+  };
+  bind("reset-data-form",data=>applySystemChange("/system/reset",{disk:data.has("disk"),confirmation:data.get("confirmation")}));
   const panel = get("settings-system");
   panel.querySelector('[data-action="updateDependency"]').disabled = true;
   panel.querySelector('[data-action="restartDependency"]').hidden = true;
+}
+
+async function applySystemChange(path, data) {
+  const result = await api(path,"POST",data);
+  const panel = get("settings-system");
+  panel.dataset.maintenance = "1";
+  get("system-change-status").textContent = t(result.restarting?"restarting":"maintenanceManual");
+  get("restore-backup-form").hidden = true;
+  get("reset-data-form").reset();
+  get("reset-word").textContent = "RESET";
+  get("system-change-status").scrollIntoView({block:"nearest"});
 }
 
 function settingsTab(panel) {
@@ -529,6 +594,12 @@ async function pollSystem() {
       updating && !waiting && t("dependencyChecking"), pending && !can_restart && t("restartPending")].filter(Boolean).join(" · ");
     const lastUpdate = result.events.find(event=>event.area==="dependency");
     alert.textContent = t(problem || (lastUpdate?.severity==="error" ? lastUpdate.code : "")) || "";
+    if (panel.dataset.maintenance && !result.maintenance_pending) {
+      delete panel.dataset.maintenance;
+      const event = result.events.find(entry=>entry.area==="system");
+      get("system-change-status").textContent = t(event?.code || "done");
+      refresh().catch(()=>{});
+    }
     const signature = JSON.stringify(result.events);
     if (history.dataset.rendered!==signature) {
       const date = new Intl.DateTimeFormat(locale,{dateStyle:"short",timeStyle:"medium"});

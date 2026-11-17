@@ -10,15 +10,19 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import quote
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import BadRequest
 
 import collector
+import catalog_backup
 import dependencies
+import playlist_files
 
 
 DEFAULTS = {"download_mode": "compact", "quality": "720", "shorts": "include", "audio": "original",
@@ -162,6 +166,11 @@ class Archive:
         self.data = Path(data).resolve()
         self.library = Path(root).resolve() / "library"
         self.work = self.library.parent / "work"
+        self.playlist_directory = self.library.parent / "Playlists"
+        self.exporting = Counter()
+        self.maintenance = self.data / "maintenance"
+        self.pending_maintenance = self.maintenance / "pending.json"
+        self.maintenance_lock = threading.Lock()
         self.branding = self.data / "branding"
         self.playback = self.work / "playback"
         self.playback_budget = max(1, int(os.environ.get("GRIDTUBE_PLAYBACK_CACHE_MIB", "4096"))) * 1024 ** 2
@@ -209,6 +218,8 @@ class Archive:
             db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,progress_phase=NULL,progress_estimated=0
                           WHERE state='failed' AND (lower(error) LIKE '%unable to download video subtitles%'
                             OR error LIKE '%Postprocessing: Conversion failed!%')""")
+        self.apply_pending_maintenance()
+        self.refresh_playlist_files()
 
     @contextmanager
     def db(self):
@@ -225,6 +236,222 @@ class Archive:
 
     def defaults(self, db):
         return {**DEFAULTS, **json.loads(db.execute("SELECT prefs FROM settings").fetchone()["prefs"])}
+
+    def playlist_rows(self, db, playlist_id):
+        return db.execute("""SELECT v.id,v.folder,v.metadata FROM playlist_item p
+            JOIN video v ON v.id=p.video_id WHERE p.playlist_id=? AND v.state='ready'
+            ORDER BY v.created DESC,v.rowid DESC""", (playlist_id,)).fetchall()
+
+    @staticmethod
+    def playlist_asset(bundle, filename):
+        if not isinstance(filename, str) or not filename or filename in {".", ".."} or re.search(r"[/\\:\r\n\0]", filename):
+            raise ValueError("playlist_media_missing")
+        path = bundle / filename
+        if path.resolve() != path:
+            raise ValueError("playlist_media_missing")
+        return path
+
+    def refresh_playlist_files(self, playlist_ids=None):
+        if playlist_ids == []:
+            return
+        try:
+            self.playlist_directory.mkdir(exist_ok=True)
+            with self.db() as db:
+                if playlist_ids is None:
+                    playlist_ids = [row["id"] for row in db.execute("SELECT id FROM playlist")]
+                for playlist_id in playlist_ids:
+                    playlist = db.execute("SELECT name FROM playlist WHERE id=?", (playlist_id,)).fetchone()
+                    if not playlist:
+                        continue
+                    paths = []
+                    for row in self.playlist_rows(db, playlist_id):
+                        video = self.playlist_asset(self.video_bundle(row), json.loads(row["metadata"])["filename"])
+                        paths.append((Path("../..") / video.relative_to(self.library.parent)).as_posix())
+                    folder = self.playlist_directory / f"{collector.safe_name(playlist['name'])} [{playlist_id}]"
+                    if folder.resolve() != folder:
+                        raise ValueError("playlist_write_failed")
+                    playlist_files.write_m3u(folder, paths)
+        except (OSError, KeyError, ValueError):
+            logging.exception("Could not update the on-disk playlists")
+            with self.db() as db:
+                system_event(db, "library", "playlist_write_failed", severity="error")
+
+    def refresh_video_playlists(self, video_id):
+        with self.db() as db:
+            ids = [row["playlist_id"] for row in db.execute(
+                "SELECT playlist_id FROM playlist_item WHERE video_id=?", (video_id,))]
+        self.refresh_playlist_files(ids)
+
+    def export_playlist(self, playlist_id):
+        with self.files_lock, self.db() as db:
+            if self.pending_maintenance.exists():
+                raise ValueError("maintenance_pending")
+            playlist = db.execute("SELECT name FROM playlist WHERE id=?", (playlist_id,)).fetchone()
+            if not playlist:
+                abort(404)
+            paths, files, ids = [], [], []
+            for row in self.playlist_rows(db, playlist_id):
+                bundle = self.video_bundle(row)
+                meta = json.loads(row["metadata"])
+                video = self.playlist_asset(bundle, meta["filename"])
+                if not video.is_file():
+                    raise ValueError("playlist_media_missing")
+                prefix = Path("Videos") / f"{len(ids) + 1:04d} - {bundle.name}"
+                paths.append((prefix / video.name).as_posix())
+                files.append((video, paths[-1]))
+                sidecars = {"video.json", meta.get("thumbnail"), *meta.get("subtitles", {}).values(),
+                            *meta.get("audio_tracks", {}).values()} - {None, video.name}
+                for name in sorted(sidecars):
+                    source = self.playlist_asset(bundle, name)
+                    if source.is_file():
+                        files.append((source, (prefix / name).as_posix()))
+                ids.append(row["id"])
+            self.exporting.update(ids)
+
+        def release():
+            with self.files_lock:
+                self.exporting.subtract(ids)
+                for video_id in ids:
+                    if self.exporting[video_id] <= 0:
+                        del self.exporting[video_id]
+
+        filename = quote(collector.safe_name(playlist["name"]) + ".zip")
+        response = Response(playlist_files.export_zip(paths, files), mimetype="application/zip",
+                            headers={"Content-Disposition": f"attachment; filename=playlist.zip; filename*=UTF-8''{filename}",
+                                     "Cache-Control": "no-store"})
+        response.call_on_close(release)
+        return response
+
+    def validate_backup_row(self, table, row):
+        if table == "settings":
+            if row["id"] != 1:
+                raise ValueError("backup_invalid")
+            preferences(json.loads(row["prefs"]))
+        elif table in {"channel", "playlist"}:
+            if not re.fullmatch(r"[a-f0-9]{10}", row["id"]):
+                raise ValueError("backup_invalid")
+            label(row["name"])
+            if table == "channel":
+                folder = self.playlist_asset(self.library, row["folder"])
+                if not folder.name.endswith(f" [{row['id']}]"):
+                    raise ValueError("backup_invalid")
+                if row["source"] and collector.youtube_url(row["source"], "channel")[0] != row["source"]:
+                    raise ValueError("backup_invalid")
+                preferences(json.loads(row["overrides"]), partial=True)
+                checked_rule(row["title_filter"])
+        elif table == "track_job":
+            if row["kind"] not in {"audio", "subtitle"} or not collector.LANGUAGE_TAG.fullmatch(row["code"]):
+                raise ValueError("backup_invalid")
+            if row["state"] == "running":
+                row["state"] = "queued"
+        elif table == "video":
+            return self.validate_backup_video(row)
+        return False
+
+    def validate_backup_video(self, row):
+        if collector.youtube_url(row["url"], "video")[1] != row["id"]:
+            raise ValueError("backup_invalid")
+        if row["state"] not in {"ready", "removed", "queued", "running", "failed"}:
+            raise ValueError("backup_invalid")
+        prefs = json.loads(row["prefs"])
+        rule = checked_rule(prefs.pop("title_filter", ""))
+        prefs = preferences(prefs)
+        if rule:
+            prefs["title_filter"] = rule
+        row["prefs"] = encode(prefs)
+        capture_preferences(json.loads(row["capture_overrides"]))
+        row["pending_folder"] = row["pending_channel"] = None
+        if row["state"] == "running":
+            row.update(state="queued", percent=0, progress_phase=None, progress_estimated=0)
+        if row["state"] in {"ready", "removed"}:
+            bundle = self.video_bundle(row)
+            meta = json.loads(row["metadata"])
+            picture = self.playlist_asset(bundle, meta["filename"])
+            for name in (meta.get("thumbnail"), *meta.get("audio_tracks", {}).values(), *meta.get("subtitles", {}).values()):
+                if name is not None:
+                    self.playlist_asset(bundle, name)
+            source = meta.get("source_channel_url")
+            if source and collector.youtube_url(source, "channel")[0] != source:
+                raise ValueError("backup_invalid")
+            if row["state"] == "ready" and not picture.is_file():
+                row["state"] = "removed"
+                return True
+        return False
+
+    def preview_backup(self, upload):
+        with self.maintenance_lock:
+            if self.pending_maintenance.exists():
+                raise ValueError("maintenance_pending")
+            self.maintenance.mkdir(exist_ok=True)
+            token = uuid.uuid4().hex
+            with tempfile.TemporaryDirectory(dir=self.maintenance) as scratch:
+                candidate = Path(scratch) / "catalog.sqlite3"
+                try:
+                    counts = catalog_backup.load_backup(upload, candidate, SCHEMA, self.validate_backup_row)
+                except (sqlite3.Error, ValueError, AttributeError, KeyError, TypeError) as exc:
+                    raise ValueError("backup_invalid") from exc
+                for previous in self.maintenance.glob("preview-*.sqlite3"):
+                    previous.unlink(missing_ok=True)
+                candidate.rename(self.maintenance / f"preview-{token}.sqlite3")
+            return {"token": token, **counts}
+
+    def stage_maintenance(self, operation):
+        with self.maintenance_lock, self.files_lock:
+            if self.pending_maintenance.exists():
+                raise ValueError("maintenance_pending")
+            if self.exporting:
+                raise ValueError("playlist_export_busy")
+            token = operation.get("token")
+            if operation["action"] == "restore" and not self.backup_candidate(token).is_file():
+                raise ValueError("backup_preview_missing")
+            self.maintenance.mkdir(exist_ok=True)
+            staged = self.maintenance / "pending.tmp"
+            staged.write_text(encode(operation), encoding="utf-8")
+            staged.replace(self.pending_maintenance)
+
+    def backup_candidate(self, token):
+        if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
+            raise ValueError("backup_preview_missing")
+        return self.maintenance / f"preview-{token}.sqlite3"
+
+    def apply_pending_maintenance(self):
+        if not self.pending_maintenance.is_file():
+            return
+        candidate = None
+        try:
+            operation = json.loads(self.pending_maintenance.read_text(encoding="utf-8"))
+            action = operation["action"]
+            if action == "restore":
+                candidate = self.backup_candidate(operation["token"])
+                if not candidate.is_file():
+                    raise ValueError("backup_preview_missing")
+                targets = [self.playlist_directory]
+            elif action == "reset":
+                targets = [self.branding, self.playlist_directory, self.work]
+                if operation["disk"] is True:
+                    targets.append(self.library)
+            else:
+                raise ValueError("backup_invalid")
+            if any(path.resolve() != path for path in targets):
+                raise ValueError("maintenance_invalid_path")
+            with self.db() as db:
+                catalog_backup.replace_catalog(db, candidate)
+                db.execute("INSERT OR IGNORE INTO settings VALUES (1,?)", (encode(DEFAULTS),))
+            for path in targets:
+                if path.exists():
+                    shutil.rmtree(path)
+                path.mkdir()
+            self.playback.mkdir(exist_ok=True)
+            with self.db() as db:
+                system_event(db, "system", "backup_restored" if action == "restore" else "data_reset")
+        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
+            logging.exception("Could not complete the staged maintenance operation")
+            with self.db() as db:
+                system_event(db, "system", "maintenance_failed", exc, "error")
+        finally:
+            self.pending_maintenance.unlink(missing_ok=True)
+            for preview in self.maintenance.glob("preview-*.sqlite3"):
+                preview.unlink(missing_ok=True)
 
     def update_dependency(self):
         try:
@@ -619,6 +846,7 @@ class Archive:
                 bundle.rename(target)
                 with self.db() as db:
                     self.finish_publish(db, db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
+                self.refresh_video_playlists(video_id)
         self.schedule_video_origin(video_id)
         try:
             shutil.rmtree(inputs)
@@ -661,18 +889,22 @@ class Archive:
                 self.capture(item)
             except Exception as exc:
                 logging.exception("Capture failed for %s", item["id"])
-                with self.db() as db:
-                    row = db.execute("SELECT * FROM video WHERE id=?", (item["id"],)).fetchone()
-                    if row["pending_folder"] and (self.library / row["pending_folder"]).is_dir():
-                        self.finish_publish(db, row)
-                    else:
-                        db.execute("""UPDATE video SET state='failed',error=?,
-                                      pending_folder=NULL,pending_channel=NULL WHERE id=?""",
-                                   (str(exc)[-450:], item["id"]))
-                        system_event(db, "downloads", "download_failed", f"{item['id']} · {exc}", "error")
+                with self.files_lock:
+                    with self.db() as db:
+                        row = db.execute("SELECT * FROM video WHERE id=?", (item["id"],)).fetchone()
+                        if row["pending_folder"] and (self.library / row["pending_folder"]).is_dir():
+                            self.finish_publish(db, row)
+                        else:
+                            db.execute("""UPDATE video SET state='failed',error=?,
+                                          pending_folder=NULL,pending_channel=NULL WHERE id=?""",
+                                       (str(exc)[-450:], item["id"]))
+                            system_event(db, "downloads", "download_failed", f"{item['id']} · {exc}", "error")
+                    self.refresh_video_playlists(item["id"])
 
     def move(self, video_id, target_id, new_name=None):
         with self.files_lock:
+            if self.exporting[video_id]:
+                raise ValueError("playlist_export_busy")
             with self.db() as db:
                 row = db.execute("SELECT * FROM video WHERE id=? AND state='ready'", (video_id,)).fetchone()
                 if row is None:
@@ -700,6 +932,7 @@ class Archive:
                 raise
             with self.db() as db:
                 self.finish_publish(db, db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
+            self.refresh_video_playlists(video_id)
 
     def video_bundle(self, row):
         relative = Path(row["folder"] or "")
@@ -713,12 +946,15 @@ class Archive:
         if not collector.VIDEO_ID.fullmatch(video_id):
             abort(404)
         with self.files_lock:
+            if disk and self.exporting[video_id]:
+                raise ValueError("playlist_export_busy")
             with self.db() as db:
                 row = db.execute("SELECT * FROM video WHERE id=? AND state IN ('ready','removed')",
                                  (video_id,)).fetchone()
                 if row is None:
                     abort(404)
                 db.execute("UPDATE video SET state='removed' WHERE id=?", (video_id,))
+            self.refresh_video_playlists(video_id)
             if not disk:
                 return
 
@@ -761,13 +997,15 @@ class Archive:
                     legacy.unlink(missing_ok=True)
 
     def restore_video(self, video_id):
-        with self.files_lock, self.db() as db:
-            row = db.execute("SELECT * FROM video WHERE id=? AND state='removed'", (video_id,)).fetchone()
-            if row is None:
-                abort(404)
-            if not (self.video_bundle(row) / json.loads(row["metadata"])["filename"]).is_file():
-                raise ValueError("restore_media_missing")
-            db.execute("UPDATE video SET state='ready' WHERE id=?", (video_id,))
+        with self.files_lock:
+            with self.db() as db:
+                row = db.execute("SELECT * FROM video WHERE id=? AND state='removed'", (video_id,)).fetchone()
+                if row is None:
+                    abort(404)
+                if not (self.video_bundle(row) / json.loads(row["metadata"])["filename"]).is_file():
+                    raise ValueError("restore_media_missing")
+                db.execute("UPDATE video SET state='ready' WHERE id=?", (video_id,))
+            self.refresh_video_playlists(video_id)
         self.changed.set()
 
 
@@ -810,11 +1048,31 @@ def create_app(data=None, root=None, workers=True):
             raise BadRequest()
         return value
 
-    def local_change():
+    def check_origin():
         origin = request.headers.get("Origin")
         if origin and origin != request.host_url.rstrip("/"):
             abort(403)
+
+    def local_change():
+        check_origin()
         return body()
+
+    def restart_process():
+        timer = threading.Timer(1.5, os._exit, args=(0,))
+        timer.daemon = True
+        timer.start()
+
+    def prepare_system_change(operation):
+        if not archive.dependency_lock.acquire(blocking=False):
+            return jsonify(error="dependency_busy"), 409
+        try:
+            archive.stage_maintenance(operation)
+        finally:
+            archive.dependency_lock.release()
+        restarting = workers and os.environ.get("GRIDTUBE_RESTART_IN_DOCKER") == "1"
+        if restarting:
+            restart_process()
+        return jsonify(ok=True, restarting=restarting), 202
 
     @app.errorhandler(ValueError)
     def invalid(exc):
@@ -865,13 +1123,49 @@ def create_app(data=None, root=None, workers=True):
     def system_status():
         with archive.db() as db:
             events = [dict(row) for row in db.execute("SELECT * FROM system_event ORDER BY id DESC LIMIT 50")]
-        return jsonify(yt_dlp=archive.dependency_status(), events=events)
+        return jsonify(yt_dlp=archive.dependency_status(), events=events,
+                       maintenance_pending=archive.pending_maintenance.exists())
+
+    @app.get("/api/system/backup")
+    def backup_catalog():
+        def download():
+            with archive.db() as db:
+                yield from catalog_backup.export_lines(db)
+
+        return Response(download(), mimetype="application/x-ndjson",
+                        headers={"Content-Disposition": "attachment; filename=gridtube-backup.jsonl",
+                                 "Cache-Control": "no-store"})
+
+    @app.post("/api/system/backup/preview")
+    def preview_backup():
+        check_origin()
+        request.max_content_length = 512 * 1024 ** 2
+        upload = request.files.get("backup")
+        if upload is None:
+            raise ValueError("backup_invalid")
+        return jsonify(archive.preview_backup(upload.stream))
+
+    @app.post("/api/system/backup/restore")
+    def restore_backup():
+        data = local_change()
+        return prepare_system_change({"action": "restore", "token": data.get("token")})
+
+    @app.post("/api/system/reset")
+    def reset_data():
+        data = local_change()
+        disk = data.get("disk")
+        if type(disk) is not bool or data.get("confirmation") != ("RESET MEDIA" if disk else "RESET"):
+            raise ValueError("reset_confirmation_invalid")
+        return prepare_system_change({"action": "reset", "disk": disk})
 
     @app.post("/api/system/yt-dlp")
     def update_yt_dlp():
         local_change()
         if not archive.dependency_lock.acquire(blocking=False):
             return jsonify(error="dependency_busy"), 409
+        if archive.pending_maintenance.exists():
+            archive.dependency_lock.release()
+            return jsonify(error="maintenance_pending"), 409
         threading.Thread(target=archive.update_dependency, daemon=True, name="yt-dlp-update").start()
         return jsonify(ok=True), 202
 
@@ -881,9 +1175,10 @@ def create_app(data=None, root=None, workers=True):
         status = archive.dependency_status()
         if not status["can_restart"] or not status["pending"] or not archive.dependency_lock.acquire(blocking=False):
             return jsonify(error="restart_unavailable"), 409
-        timer = threading.Timer(1.5, os._exit, args=(0,))
-        timer.daemon = True
-        timer.start()
+        if archive.pending_maintenance.exists():
+            archive.dependency_lock.release()
+            return jsonify(error="maintenance_pending"), 409
+        restart_process()
         return jsonify(ok=True), 202
 
     @app.post("/api/scans")
@@ -1251,23 +1546,33 @@ def create_app(data=None, root=None, workers=True):
     def add_playlist():
         data = body()
         playlist_id = uuid.uuid4().hex[:10]
-        with archive.db() as db:
-            db.execute("INSERT INTO playlist VALUES (?,?)", (playlist_id, label(data.get("name"))))
-            if data.get("video"):
-                db.execute("INSERT INTO playlist_item VALUES (?,?)", (playlist_id, data["video"]))
+        with archive.files_lock:
+            with archive.db() as db:
+                db.execute("INSERT INTO playlist VALUES (?,?)", (playlist_id, label(data.get("name"))))
+                if data.get("video"):
+                    db.execute("INSERT INTO playlist_item VALUES (?,?)", (playlist_id, data["video"]))
+            archive.refresh_playlist_files([playlist_id])
         return jsonify(id=playlist_id), 201
 
     @app.put("/api/playlists/<playlist_id>/videos/<video_id>")
     def add_to_playlist(playlist_id, video_id):
-        with archive.db() as db:
-            db.execute("INSERT OR IGNORE INTO playlist_item VALUES (?,?)", (playlist_id, video_id))
+        with archive.files_lock:
+            with archive.db() as db:
+                db.execute("INSERT OR IGNORE INTO playlist_item VALUES (?,?)", (playlist_id, video_id))
+            archive.refresh_playlist_files([playlist_id])
         return jsonify(ok=True)
 
     @app.delete("/api/playlists/<playlist_id>/videos/<video_id>")
     def remove_from_playlist(playlist_id, video_id):
-        with archive.db() as db:
-            db.execute("DELETE FROM playlist_item WHERE playlist_id=? AND video_id=?", (playlist_id, video_id))
+        with archive.files_lock:
+            with archive.db() as db:
+                db.execute("DELETE FROM playlist_item WHERE playlist_id=? AND video_id=?", (playlist_id, video_id))
+            archive.refresh_playlist_files([playlist_id])
         return jsonify(ok=True)
+
+    @app.get("/api/playlists/<playlist_id>/export")
+    def export_playlist(playlist_id):
+        return archive.export_playlist(playlist_id)
 
     @app.get("/media/<video_id>/<asset>")
     def media(video_id, asset):

@@ -97,6 +97,8 @@ Cada captura publica um MP4 ou WebM com os fluxos baixados da origem. `video.jso
 
 Para levar só a mídia, copie `library/` dentro da pasta do acervo ou as pastas desejadas. Para usar com Jellyfin, monte essa `library/` em modo somente leitura e aponte uma biblioteca do tipo **Vídeos domésticos e fotos** para esse caminho. O app e o Jellyfin mantêm catálogos independentes, incluindo playlists e progresso. Faça o rescan do Jellyfin depois de mover arquivos.
 
+Cada playlist tem um `playlist.m3u8` em UTF-8 na pasta `Playlists/` do acervo. Copie `library/` e `Playlists/` juntas para manter os caminhos relativos. Para levar só uma playlist, use **Exportar playlist em ZIP** no cabeçalho dela. O ZIP inclui a lista, os vídeos e os arquivos auxiliares disponíveis, com caminhos relativos à pasta extraída.
+
 [Jellyfin e visualização por pastas](https://jellyfin.org/posts/jellyfin-release-12.0/) · [MP4 e convenções de arquivos auxiliares](https://jellyfin.org/docs/general/server/media/music-videos/)
 
 ## Levar para um ambiente off-grid
@@ -104,8 +106,8 @@ Para levar só a mídia, copie `library/` dentro da pasta do acervo ou as pastas
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.1.tar gridtube:0.7.1
-docker load -i gridtube-0.7.1.tar
+docker save -o gridtube-0.7.2.tar gridtube:0.7.2
+docker load -i gridtube-0.7.2.tar
 docker compose up -d --no-build --pull never
 ~~~
 
@@ -114,6 +116,12 @@ A interface, a busca, a organização e o player usam recursos locais. A leitura
 ## Manutenção do yt-dlp
 
 Em **Configurações → Sistema**, use **Atualizar yt-dlp** para consultar a versão estável do PyPI. O GridTube testa a instalação e mostra a versão pronta. No Docker, **Reiniciar e aplicar** ativa a versão baixada. O reinício interrompe a reprodução e a fila retoma os trabalhos pendentes. A atualização fica no volume `data/`. Consulte o **Registro de atividade** para ver resultados e falhas recentes.
+
+## Backup, restauração e limpeza
+
+Em **Configurações → Sistema**, exporte `gridtube-backup.jsonl` para levar os canais, playlists, catálogo, fila, progresso e preferências. Para migrar, copie a pasta do acervo para o novo host e confira a prévia do backup antes de restaurar. Vídeos com arquivos ausentes ficam em **Removidos** e podem ser restaurados depois de copiar os arquivos.
+
+Em **Limpar dados do app**, digite `RESET` para apagar os dados do app e manter `library/`. Para apagar também os vídeos e os arquivos auxiliares dessa biblioteca, marque a caixa de exclusão no HD e digite `RESET MEDIA`. A restauração e a limpeza entram em vigor na reinicialização do serviço.
 
 
 GridTube é um projeto independente inspirado pelo [UnTube](https://github.com/tomfriart/untube).
