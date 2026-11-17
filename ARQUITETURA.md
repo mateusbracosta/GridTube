@@ -51,9 +51,12 @@ Cada idioma guarda uma faixa de áudio e uma legenda. Legendas enviadas pelo can
 - `data/library.sqlite` guarda canais, catálogo de origem, fila, associações e progresso. O WAL exige cópia consistente do banco. Pare o serviço antes de copiar os diretórios para backup, ou use a API de backup do SQLite para um snapshot só do banco.
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.
 - `archive/work` guarda arquivos de trabalho e variantes derivadas. O app retoma jobs que ficaram em execução após reiniciar. Na publicação e na movimentação, registra o destino pretendido no SQLite antes de renomear a pasta.
+- Remover um vídeo muda seu estado para `removed`, preservando o bundle, as playlists e o progresso. A mídia deixa de ser servida pelo GridTube e pode ser restaurada em **Removidos**. Para exclusão física, o app valida o caminho específico do bundle, move a pasta para `archive/work/deleting`, limpa os caches de reprodução associados e remove o registro do banco após apagar a pasta. Se houver falha após a movimentação, a exclusão pode ser repetida em **Removidos**.
 - Para restaurar o conjunto, recupere `data/`, `archive/library/`, o Compose e a imagem da mesma arquitetura. Aponte o Jellyfin para `archive/library` em modo somente leitura. O índice do Jellyfin é independente.
 
 ## API e verificação
+
+O painel **Sistema** consulta `GET /api/system`, que mostra as versões de `yt-dlp` em uso, na imagem e pronta para ativar. `POST /api/system/yt-dlp` consulta a versão estável no PyPI e instala apenas os wheels da versão selecionada e dependências em uma pasta temporária sob `data/dependencies/yt-dlp`. Após um teste de importação, promove a pasta e grava um ponteiro para a próxima inicialização. A imagem continua com a versão fixada no `requirements.txt`. Se a versão preparada não carregar, o app registra o erro e usa a versão da imagem. No Compose, `POST /api/system/yt-dlp/restart` reinicia o processo via política do Docker. O registro persistente tem até 100 eventos e exibe os 50 mais recentes.
 
 | Operação | Rotas principais |
 | --- | --- |
@@ -63,5 +66,6 @@ Cada idioma guarda uma faixa de áudio e uma legenda. Legendas enviadas pelo can
 | Playlists | `POST /api/playlists`, `PUT/DELETE /api/playlists/{id}/videos/{video_id}` |
 | Faixas | `GET/POST /api/videos/{id}/tracks`, `POST /api/videos/{id}/tracks/discover` |
 | Arquivos | `/branding/{id}/{asset}`, `/media/{id}/{asset}`, `/playback/{id}/{language}` |
+| Exclusão | `DELETE /api/videos/{id}` com `disk` booleano, `POST /api/videos/{id}/restore` |
 
 Antes de atualizar, rode `docker compose config --quiet`. Depois de `docker compose up -d --build --wait`, confira `docker compose ps` e abra o app. Para isolar falhas, use `docker compose logs --tail 80 untube`. Para testar as faixas, baixe um vídeo curto, acrescente uma faixa, troque no meio da reprodução e repita com internet bloqueada após a captura. Teste a indexação no Jellyfin separadamente.

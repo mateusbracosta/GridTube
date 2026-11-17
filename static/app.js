@@ -6,6 +6,39 @@ const translations = {
   channels: ["Canais","Channels"],
   playlists: ["Playlists","Playlists"],
   settings: ["Configurações","Settings"],
+  system: ["Sistema","System"],
+  activeVersion: ["Versão em uso","Active version"],
+  bundledVersion: ["Versão da imagem","Bundled version"],
+  updateDependency: ["Atualizar yt-dlp","Update yt-dlp"],
+  dependencyHelp: ["Consulta a versão estável no PyPI. A atualização fica no volume de dados e entra em uso ao reiniciar o GridTube.","Checks the stable release on PyPI. The update is stored in the data volume and takes effect after GridTube restarts."],
+  dependencyChecking: ["Consultando e preparando a atualização…","Checking for and preparing the update…"],
+  dependencyReady: ["Versão pronta para ativar","Version ready to activate"],
+  dependency_staged: ["Atualização preparada","Update staged"],
+  dependency_current: ["O yt-dlp está atualizado.","yt-dlp is up to date."],
+  dependency_failed: ["Falha ao atualizar o yt-dlp. A versão em uso foi preservada.","Could not update yt-dlp. The active version was preserved."],
+  dependency_load_failed: ["Falha ao carregar a atualização do yt-dlp. O GridTube está usando a versão da imagem.","Could not load the yt-dlp update. GridTube is using the bundled version."],
+  dependency_busy: ["Já há uma atualização em andamento.","An update is already running."],
+  restartDependency: ["Reiniciar e aplicar","Restart and apply"],
+  restartConfirm: ["Reiniciar o GridTube agora? A reprodução será interrompida e a fila volta ao subir.","Restart GridTube now? Playback will stop and the queue will resume when it comes back."],
+  restarting: ["Aguardando o GridTube voltar…","Waiting for GridTube to come back…"],
+  restartPending: ["Reinicie o serviço para aplicar a atualização.","Restart the service to apply the update."],
+  restart_unavailable: ["Não foi possível iniciar o reinício pelo app.","Could not start a restart from the app."],
+  systemUnavailable: ["Não foi possível consultar o estado do sistema.","Could not load system status."],
+  activityLog: ["Registro de atividade","Activity log"],
+  noActivity: ["Nenhum evento registrado.","No events recorded yet."],
+  catalog_failed: ["Falha ao consultar o catálogo","Could not check the catalog"],
+  download_failed: ["Falha no download","Download failed"],
+  download_completed: ["Vídeo salvo","Video saved"],
+  removed: ["Removidos","Removed"],
+  removeVideo: ["Excluir vídeo","Remove video"],
+  keepMedia: ["Remover da biblioteca","Remove from library"],
+  deleteMedia: ["Excluir também do disco","Also delete from disk"],
+  removeVideoNote: ["Remover da biblioteca mantém a pasta e permite restaurar o vídeo em Removidos. Excluir do disco apaga o vídeo e seus arquivos auxiliares.","Removing from the library keeps the folder and lets you restore the video from Removed. Deleting from disk erases the video and its sidecar files."],
+  deleteMediaNote: ["Esta ação apaga o vídeo e seus arquivos auxiliares do disco.","This deletes the video and its sidecar files from disk."],
+  restoreVideo: ["Restaurar à biblioteca","Restore to library"],
+  delete_disk_failed: ["A exclusão no disco não terminou. Confira as permissões da pasta e tente novamente em Removidos.","Disk deletion did not finish. Check folder permissions and try again from Removed."],
+  restore_media_missing: ["O arquivo do vídeo não está na pasta original.","The video file is missing from its original folder."],
+  restore_removed_first: ["Este vídeo está em Removidos. Restaure-o por lá.","This video is in Removed. Restore it from there."],
   addChannel: ["Adicionar canal","Add channel"],
   localChannel: ["Criar canal local","Create local channel"],
   addLink: ["Baixar por link","Download link"],
@@ -342,7 +375,7 @@ function nav() {
   const item = (key,title,glyph) => btn("scope",title,glyph,!watchPath()&&scope===key?"active":"",key);
   const pending = (state.counts.queued||0)+(state.counts.running||0);
   const html = `<div class="nav">${item("",t("library"),"library")}${item("continue",t("resume"),"clock")}${item("inbox",t("inbox"),"inbox")}
-    ${item("downloads",t("downloads")+(pending?` · ${pending}`:""),"download")}</div>
+    ${item("downloads",t("downloads")+(pending?` · ${pending}`:""),"download")}${state.counts.removed||scope==="removed"?item("removed",t("removed"),"inbox"):""}</div>
     <div class="nav-head">${t("channels")}${btn("localChannel",t("localChannel"),"plus","flat icon-only")}</div>
     <div class="nav">${state.channels.map(c=>`<button type="button" class="${!watchPath()&&scope===`channel:${c.id}`?"active":""}" data-action="scope" data-value="channel:${c.id}" title="${esc(c.name)}" aria-label="${esc(c.name)}">${channelAvatar(c)}<span>${esc(c.name)}</span></button>`).join("")}</div>
     <div class="nav-head">${t("playlists")}${btn("addPlaylist",t("addPlaylist"),"plus","flat icon-only")}</div>
@@ -367,7 +400,7 @@ function pages(current,total,size,action) {
 async function loadLibrary() {
   if (watchPath()) return;
   const id = ++lastRequest;
-  const query = new URLSearchParams({scope,q:search,page,state:scope==="downloads"?"jobs":"ready"});
+  const query = new URLSearchParams({scope,q:search,page,state:({downloads:"jobs",removed:"removed"})[scope]||"ready"});
   try {
     const {videos,total} = await api(`/videos?${query}`);
     if (id!==lastRequest) return;
@@ -377,7 +410,7 @@ async function loadLibrary() {
     prior=signature; displayed=videos;
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
-    const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads"})[scope] || "library");
+    const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
     const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
     const home = !scope && !search && page===1, hero = home && videos[0];
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
@@ -386,9 +419,9 @@ async function loadLibrary() {
       ${hero?btn("watch",t("play"),"play","accent",hero.id):btn("addChannel",t("addChannel"),"plus","accent")}
       </div></section><div class="section-head"><h2>${t("recent")}</h2></div>` :
       channel ? channelPage(channel,actions) : `<div class="page-head"><h1>${esc(title)}</h1></div>`;
-    const isQueue = scope==="downloads";
+    const isQueue = scope==="downloads", isRemoved = scope==="removed";
     const results = videos.length
-      ? `<div class="${isQueue?"jobs":"grid"}">${videos.map(isQueue?job:card).join("")}</div>`
+      ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
       : `<p class="empty">${t(search?"emptyCatalog":isQueue?"noJobs":"nothing")}</p>`;
     get("library").innerHTML = head + results + pages(page,total,60,"page");
   } catch (error) {
@@ -407,6 +440,93 @@ function job(v) {
   return `<article class="job"><div><strong>${esc(v.title)}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
     ${v.state==="running"?`<progress max="100" value="${Number(v.percent)}"></progress>`:""}
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div>${v.state==="failed"?`<aside class="job-actions">${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}</aside>`:""}</article>`;
+}
+function removedRow(v) {
+  return `<article class="job"><div><strong>${esc(v.title)}</strong></div><aside class="job-actions">
+    ${btn("restoreVideo",t("restoreVideo"),"","",v.id)}${btn("removeVideo",t("deleteMedia"),"","flat",v.id)}</aside></article>`;
+}
+
+function openSettings() {
+  dialog(t("settings"),`<div class="dialog-body">
+    <nav class="settings-tabs" aria-label="${t("settings")}">
+      <button type="button" data-action="settingsTab" data-value="downloads" aria-pressed="true">${t("downloads")}</button>
+      <button type="button" data-action="settingsTab" data-value="system" aria-pressed="false">${t("system")}</button>
+    </nav>
+    <form id="settings-downloads" class="stack"><h3>${t("defaults")}</h3>${prefs(state.settings,false)}
+      <p role="alert"></p><button class="accent" type="submit">${t("save")}</button></form>
+    <div id="settings-system" class="stack" hidden>
+      <section class="system-card"><h3>yt-dlp</h3><p class="note">${t("dependencyHelp")}</p>
+        <p id="dependency-status" role="status"></p><p id="dependency-error" role="alert"></p>
+        <div class="system-actions">${btn("updateDependency",t("updateDependency"),"","accent")}
+        ${btn("restartDependency",t("restartDependency"))}</div></section>
+      <section class="system-card"><h3>${t("activityLog")}</h3><div id="system-events"></div></section>
+    </div></div>`);
+  bind("settings-downloads",async data=>{await api("/settings","PUT",readPrefs(data));await finish();});
+  const panel = get("settings-system");
+  panel.querySelector('[data-action="updateDependency"]').disabled = true;
+  panel.querySelector('[data-action="restartDependency"]').hidden = true;
+}
+
+function settingsTab(panel) {
+  get("settings-downloads").hidden = panel!=="downloads";
+  get("settings-system").hidden = panel!=="system";
+  for (const tab of modal.querySelectorAll('[data-action="settingsTab"]')) {
+    tab.setAttribute("aria-pressed",String(tab.dataset.value===panel));
+  }
+  if (panel==="system") pollSystem();
+}
+
+async function pollSystem() {
+  const panel = get("settings-system");
+  if (!modal.open || !panel || panel.hidden || panel.dataset.fetching) return;
+  panel.dataset.fetching = "1";
+  const status = get("dependency-status"), alert = get("dependency-error"), history = get("system-events");
+  const restart = panel.querySelector('[data-action="restartDependency"]');
+  const update = panel.querySelector('[data-action="updateDependency"]');
+  const restartUntil = Number(panel.dataset.restartUntil || 0);
+  try {
+    const result = await api("/system");
+    if (!panel.isConnected) return;
+    const {active,bundled,pending,problem,updating,can_restart} = result.yt_dlp;
+    const waiting = restartUntil>Date.now() && pending;
+    if (!waiting) delete panel.dataset.restartUntil;
+    update.disabled = updating || Boolean(waiting);
+    restart.disabled = update.disabled;
+    restart.hidden = !(pending && can_restart);
+    status.textContent = [t("activeVersion")+" "+active, t("bundledVersion")+" "+bundled,
+      pending && t("dependencyReady")+" "+pending, waiting && t("restarting"),
+      updating && !waiting && t("dependencyChecking"), pending && !can_restart && t("restartPending")].filter(Boolean).join(" · ");
+    const lastUpdate = result.events.find(event=>event.area==="dependency");
+    alert.textContent = t(problem || (lastUpdate?.severity==="error" ? lastUpdate.code : "")) || "";
+    const signature = JSON.stringify(result.events);
+    if (history.dataset.rendered!==signature) {
+      const date = new Intl.DateTimeFormat(locale,{dateStyle:"short",timeStyle:"medium"});
+      history.innerHTML = result.events.length ? `<ul class="system-events">${result.events.map(event=>
+        `<li class="${event.severity==="error"?"system-error":""}"><time>${date.format(event.timestamp*1000)}</time>
+        <strong>${esc(t(event.code))}</strong>${event.detail?`<pre>${esc(event.detail)}</pre>`:""}</li>`).join("")}</ul>` :
+        `<p class="note">${t("noActivity")}</p>`;
+      history.dataset.rendered = signature;
+    }
+  } catch {
+    alert.textContent = t(restartUntil>Date.now()?"restarting":"systemUnavailable");
+  } finally {
+    delete panel.dataset.fetching;
+  }
+}
+
+async function runMaintenance(restart) {
+  const panel = get("settings-system"), alert = get("dependency-error");
+  if (!panel || (restart && !window.confirm(t("restartConfirm")))) return;
+  const buttons = [...panel.querySelectorAll("button")];
+  buttons.forEach(button=>button.disabled=true);
+  try {
+    await api(`/system/yt-dlp${restart?"/restart":""}`,"POST",{});
+    if (restart) panel.dataset.restartUntil = String(Date.now()+45000);
+    await pollSystem();
+  } catch (error) {
+    alert.textContent=t(error.message);
+    buttons.forEach(button=>button.disabled=false);
+  }
 }
 function dialog(title, html, css="") {
   catalog = null;
@@ -651,7 +771,7 @@ async function pollCatalog(session) {
     if (session.last!==signature) {
       session.last=signature;
       const list=data.entries.map(item=>`<label class="catalog-item"><input type="checkbox" value="${item.id}" ${item.saved?"disabled":""}>
-        <span>${esc(item.title)}</span><small>${item.saved?t("saved"):[item.kind!=="videos"?t(item.kind):"",duration(item.duration)].filter(Boolean).join(" · ")}</small></label>`).join("");
+        <span>${esc(item.title)}</span><small>${item.saved?t(item.saved==="removed"?"removed":"saved"):[item.kind!=="videos"?t(item.kind):"",duration(item.duration)].filter(Boolean).join(" · ")}</small></label>`).join("");
       const results=get("catalog-results"), priorOffset=results.querySelector(".catalog-items")?.scrollTop||0;
       const more=data.entries.length<data.total?`<div class="pages">${btn("catalogMore",t("loadMore"))}${btn("catalogAll",t("loadAll"))}</div>`:"";
       results.innerHTML=list?`<div class="catalog-items">${list}</div>${more}`:`<p class="empty">${t("emptyCatalog")}</p>`;
@@ -992,11 +1112,37 @@ function organize(item) {
     <form id="new-channel">${field("newChannelName","","required maxlength=100")}<button>${t("createMove")}</button></form>
     ${state.playlists.length?`<form id="add-to">${select("playlist",t("addTo"),state.playlists.map(p=>[p.id,p.name]),"")}<button>${t("addTo")}</button></form>`:""}
     <form id="new-playlist">${field("newPlaylistName","","required maxlength=100")}<button>${t("addPlaylist")}</button></form>
-    ${scope.startsWith("playlist:")?btn("unplaylist",t("removeFrom"),"","flat",item.id):""}</div>`);
+    ${scope.startsWith("playlist:")?btn("unplaylist",t("removeFrom"),"","flat",item.id):""}
+    ${btn("removeVideo",t("removeVideo"),"","flat",item.id)}</div>`);
   bind("move",async data=>{await api(`/videos/${item.id}/move`,"POST",{channel:data.get("channel")});await finish();});
   bind("new-channel",async data=>{await api(`/videos/${item.id}/move`,"POST",{name:data.get("newChannelName")});await finish();});
   if (get("add-to")) bind("add-to",async data=>{await api(`/playlists/${data.get("playlist")}/videos/${item.id}`,"PUT");await finish();});
   bind("new-playlist",async data=>{await api("/playlists","POST",{name:data.get("newPlaylistName"),video:item.id});await finish();});
+}
+
+function confirmRemove(item) {
+  if (!item) return;
+  const removed = item.state==="removed";
+  dialog(t("removeVideo"),`<form id="remove-video" class="dialog-body"><strong>${esc(item.title)}</strong>
+    <p class="note">${t(removed?"deleteMediaNote":"removeVideoNote")}</p><p role="alert"></p>
+    <div class="system-actions">${removed?"":`<button type="submit" value="keep">${t("keepMedia")}</button>`}
+    <button type="submit" value="disk" class="accent">${t("deleteMedia")}</button></div></form>`);
+  get("remove-video").onsubmit = async event=>{
+    event.preventDefault();
+    const form = event.currentTarget, alert = form.querySelector('[role="alert"]');
+    const buttons = [...form.querySelectorAll("button")];
+    buttons.forEach(button=>button.disabled=true);
+    try {
+      const disk = event.submitter?.value==="disk";
+      await api(`/videos/${item.id}`,"DELETE",{disk});
+      if (watchPath()) showLibrary("");
+      await finish();
+    } catch (error) {
+      alert.textContent=t(error.message);
+      buttons.forEach(button=>button.disabled=false);
+      await refresh().catch(()=>{});
+    }
+  };
 }
 
 async function act(action,value) {
@@ -1033,13 +1179,17 @@ async function act(action,value) {
       openCatalog(channel.source,channel);break;
     }
     case "link": downloadByLink();break;
-    case "settings":
-      simple("defaults",prefs(state.settings,false),"save",async data=>{await api("/settings","PUT",readPrefs(data));await finish();});break;
+    case "settings": openSettings();break;
+    case "settingsTab": settingsTab(value);break;
+    case "updateDependency": await runMaintenance(false);break;
+    case "restartDependency": await runMaintenance(true);break;
     case "addPlaylist":
       simple("addPlaylist",field("name","","required maxlength=100"),"save",async data=>{await api("/playlists","POST",Object.fromEntries(data));await finish();});break;
     case "unplaylist": await api(`/playlists/${scope.slice(9)}/videos/${value}`,"DELETE");await finish();break;
     case "watch": openWatch(value);break;
     case "organize": organize(item);break;
+    case "removeVideo": confirmRemove(item);break;
+    case "restoreVideo": await api(`/videos/${value}/restore`,"POST",{});await refresh();break;
     case "editRetry": editRetry(item);break;
     case "retry": await api(`/videos/${value}/retry`,"POST");await refresh();break;
     case "seek": get("player").currentTime=Number(value);break;
@@ -1059,4 +1209,5 @@ window.addEventListener("popstate",()=>showLocation(false,true));
 shell();
 refresh().catch(error=>flash(t(error.message)));
 setInterval(()=>{if((catalog?.pending||catalog?.autoPoll)&&modal.open) pollCatalog(catalog);},1600);
+setInterval(pollSystem,1800);
 setInterval(()=>{if(!modal.open) refresh().catch(()=>{});},4000);

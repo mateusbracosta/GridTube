@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -17,6 +18,7 @@ from flask import Flask, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import BadRequest
 
 import collector
+import dependencies
 
 
 DEFAULTS = {"download_mode": "compact", "quality": "720", "shorts": "include", "audio": "original",
@@ -27,6 +29,10 @@ CHOICES = {"download_mode": {"compact", "original"},
            "subtitles": {"none", "pt-BR", "en", "both"}}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), prefs TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS system_event (
+    id INTEGER PRIMARY KEY, timestamp INTEGER NOT NULL, area TEXT NOT NULL,
+    code TEXT NOT NULL, severity TEXT NOT NULL, detail TEXT
+);
 CREATE TABLE IF NOT EXISTS channel (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL, source TEXT UNIQUE,
     overrides TEXT NOT NULL, auto INTEGER DEFAULT 0, next_sync INTEGER NOT NULL DEFAULT 0,
@@ -140,6 +146,14 @@ def timestamp():
     return int(time.time())
 
 
+def system_event(db, area, code, detail=None, severity="info"):
+    if detail:
+        detail = re.sub(r"https?://\S+", "[URL]", str(detail))[-1200:]
+    db.execute("INSERT INTO system_event(timestamp,area,code,severity,detail) VALUES (?,?,?,?,?)",
+               (timestamp(), area, code, severity, detail))
+    db.execute("DELETE FROM system_event WHERE id <= (SELECT max(id)-100 FROM system_event)")
+
+
 class Archive:
     def __init__(self, data, root):
         self.data = Path(data).resolve()
@@ -148,6 +162,7 @@ class Archive:
         self.branding = self.data / "branding"
         self.playback = self.work / "playback"
         self.playback_lock = threading.Lock()
+        self.dependency_lock = threading.Lock()
         for path in (self.data, self.library, self.work, self.branding, self.playback):
             path.mkdir(parents=True, exist_ok=True)
         self.changed = threading.Event()
@@ -174,6 +189,8 @@ class Archive:
             if "retry_at" not in track_columns:
                 db.execute("ALTER TABLE track_job ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
             db.execute("INSERT OR IGNORE INTO settings VALUES (1,?)", (encode(DEFAULTS),))
+            if collector.DEPENDENCY_STARTUP_ERROR:
+                system_event(db, "dependency", collector.DEPENDENCY_STARTUP_ERROR, severity="error")
             db.execute("UPDATE scan SET state='error', error='interrupted' WHERE state='loading'")
             pending = db.execute("SELECT * FROM video WHERE pending_folder IS NOT NULL").fetchall()
             for item in pending:
@@ -199,6 +216,30 @@ class Archive:
 
     def defaults(self, db):
         return {**DEFAULTS, **json.loads(db.execute("SELECT prefs FROM settings").fetchone()["prefs"])}
+
+    def update_dependency(self):
+        try:
+            selected = dependencies.install_latest(self.data, collector.YT_DLP_VERSION)
+            with self.db() as db:
+                system_event(db, "dependency", "dependency_staged" if selected else "dependency_current", selected)
+        except Exception as exc:
+            logging.exception("yt-dlp update failed")
+            with self.db() as db:
+                system_event(db, "dependency", "dependency_failed", getattr(exc, "stderr", None) or exc, "error")
+        finally:
+            self.dependency_lock.release()
+
+    def dependency_status(self):
+        selected, problem = None, collector.DEPENDENCY_STARTUP_ERROR
+        try:
+            selected = dependencies.installed(self.data)
+        except (OSError, ValueError):
+            problem = "dependency_load_failed"
+        pending = selected if selected and dependencies.order(selected) > dependencies.order(collector.YT_DLP_VERSION) else None
+        return {"active": collector.YT_DLP_VERSION, "bundled": dependencies.BUNDLED,
+                "pending": pending, "problem": problem,
+                "updating": self.dependency_lock.locked(),
+                "can_restart": os.environ.get("GRIDTUBE_RESTART_IN_DOCKER") == "1"}
 
     def channel(self, db, channel_id):
         if not channel_id:
@@ -265,6 +306,7 @@ class Archive:
             logging.exception("Catalog scan failed")
             with self.db() as db:
                 db.execute("UPDATE scan SET state='error', error=? WHERE source=?", (str(exc)[-400:], source))
+                system_event(db, "catalog", "catalog_failed", exc, "error")
 
     def discover_playlists(self, source):
         try:
@@ -274,10 +316,11 @@ class Archive:
                     VALUES (?,?,?,?) ON CONFLICT(source,id) DO UPDATE SET title=excluded.title,ordinal=excluded.ordinal""",
                     [(source, key, title, index) for index, (key,title) in enumerate(entries)])
                 db.execute("UPDATE scan SET playlists_state='ready' WHERE source=?", (source,))
-        except Exception:
+        except Exception as exc:
             logging.exception("Playlist listing failed")
             with self.db() as db:
                 db.execute("UPDATE scan SET playlists_state='error' WHERE source=?", (source,))
+                system_event(db, "catalog", "catalog_failed", exc, "error")
 
     def scan_playlist(self, source, playlist):
         try:
@@ -296,6 +339,7 @@ class Archive:
             with self.db() as db:
                 db.execute("UPDATE source_playlist SET state='error',error=? WHERE source=? AND id=?",
                            (str(exc)[-400:], source, playlist))
+                system_event(db, "catalog", "catalog_failed", exc, "error")
 
     def save_profile(self, source, profile):
         key = hashlib.sha256(source.encode()).hexdigest()
@@ -431,8 +475,7 @@ class Archive:
             folder = self.library / row["folder"]
             base_path = folder / metadata["filename"]
             audio_path = folder / audio
-            signature = f"{video_id}:{code}:{base_path.stat().st_mtime_ns}:{audio_path.stat().st_mtime_ns}"
-            variant = self.playback / (hashlib.sha256(signature.encode()).hexdigest() + base_path.suffix)
+            variant = self.playback / f"{video_id}-{self.playback_cache_name(video_id, code, base_path, audio_path)}"
             if not variant.exists():
                 with tempfile.TemporaryDirectory(prefix="mux-", dir=self.playback) as temp:
                     staged = Path(temp) / variant.name
@@ -443,6 +486,11 @@ class Archive:
             response = send_from_directory(self.playback, variant.name, conditional=True)
             self.prune_playback(variant)
             return response
+
+    @staticmethod
+    def playback_cache_name(video_id, code, base_path, audio_path):
+        signature = f"{video_id}:{code}:{base_path.stat().st_mtime_ns}:{audio_path.stat().st_mtime_ns}"
+        return hashlib.sha256(signature.encode()).hexdigest() + base_path.suffix
 
     def prune_playback(self, current):
         budget = 4 * 1024 ** 3
@@ -485,8 +533,10 @@ class Archive:
                             self.enqueue(db, entry, current, prefs)
                     if entries:
                         db.execute("UPDATE channel SET baseline=1 WHERE id=?", (current["id"],))
-            except Exception:
+            except Exception as exc:
                 logging.exception("Subscription check failed")
+                with self.db() as db:
+                    system_event(db, "catalog", "catalog_failed", exc, "error")
             finally:
                 with self.db() as db:
                     db.execute("UPDATE channel SET next_sync=? WHERE id=?", (timestamp() + 900, channel["id"]))
@@ -511,6 +561,7 @@ class Archive:
                        (encode(meta), meta["title"], row["id"]))
             if row["state"] != "ready":
                 self.queue_default_subtitles(db, row)
+                system_event(db, "downloads", "download_completed", meta["title"])
         else:
             db.execute("UPDATE video SET pending_folder=NULL,pending_channel=NULL WHERE id=?", (row["id"],))
 
@@ -555,7 +606,8 @@ class Archive:
             self.changed.clear()
             with self.db() as db:
                 track = db.execute("""UPDATE track_job SET state='running' WHERE rowid=(
-                    SELECT rowid FROM track_job WHERE state='queued' ORDER BY exact DESC,rowid LIMIT 1
+                    SELECT t.rowid FROM track_job t JOIN video v ON v.id=t.video_id
+                    WHERE t.state='queued' AND v.state='ready' ORDER BY t.exact DESC,t.rowid LIMIT 1
                 ) RETURNING rowid AS job_id,*""").fetchone()
             if track:
                 try:
@@ -564,9 +616,14 @@ class Archive:
                     error = str(exc) if str(exc) in {"track_unavailable", "track_invalid", "track_rate_limited"} else "track_failed"
                     logging.warning("Track job failed for %s (%s): %s", track["video_id"], track["code"], error)
                     with self.db() as db:
+                        current = db.execute("SELECT state FROM video WHERE id=?", (track["video_id"],)).fetchone()
+                        if not current or current["state"] == "removed":
+                            db.execute("UPDATE track_job SET state='queued' WHERE rowid=?", (track["job_id"],))
+                            continue
                         retry_at = timestamp() + exc.seconds if isinstance(exc, collector.TrackRateLimited) else 0
                         db.execute("UPDATE track_job SET state='failed',error=?,retry_at=? WHERE rowid=?",
                                    (error, retry_at, track["job_id"]))
+                        system_event(db, "tracks", error, f"{track['video_id']} · {track['code']}", "error")
                 continue
             with self.db() as db:
                 item = db.execute("""UPDATE video SET state='running' WHERE id=(
@@ -587,6 +644,7 @@ class Archive:
                         db.execute("""UPDATE video SET state='failed',error=?,
                                       pending_folder=NULL,pending_channel=NULL WHERE id=?""",
                                    (str(exc)[-450:], item["id"]))
+                        system_event(db, "downloads", "download_failed", f"{item['id']} · {exc}", "error")
 
     def move(self, video_id, target_id, new_name=None):
         with self.files_lock:
@@ -617,6 +675,75 @@ class Archive:
                 raise
             with self.db() as db:
                 self.finish_publish(db, db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
+
+    def video_bundle(self, row):
+        relative = Path(row["folder"] or "")
+        target = self.library / relative
+        if (len(relative.parts) != 2 or relative.is_absolute() or ".." in relative.parts
+                or not relative.name.endswith(f" [{row['id']}]") or target.resolve() != target):
+            raise ValueError("delete_invalid_folder")
+        return target
+
+    def remove_video(self, video_id, disk):
+        if not collector.VIDEO_ID.fullmatch(video_id):
+            abort(404)
+        with self.files_lock:
+            with self.db() as db:
+                row = db.execute("SELECT * FROM video WHERE id=? AND state IN ('ready','removed')",
+                                 (video_id,)).fetchone()
+                if row is None:
+                    abort(404)
+                db.execute("UPDATE video SET state='removed' WHERE id=?", (video_id,))
+            if not disk:
+                return
+
+            try:
+                target = self.video_bundle(row)
+                staged = self.work / "deleting" / video_id
+                if staged.resolve() != staged:
+                    raise ValueError("delete_invalid_folder")
+                if target.exists():
+                    if staged.exists() or not target.is_dir():
+                        raise ValueError("delete_invalid_folder")
+                    staged.parent.mkdir(parents=True, exist_ok=True)
+                    target.rename(staged)
+                self.clear_video_cache(row, staged)
+                if staged.exists():
+                    shutil.rmtree(staged)
+            except (OSError, ValueError) as exc:
+                logging.exception("Disk removal failed for %s", video_id)
+                with self.db() as db:
+                    system_event(db, "library", "delete_disk_failed", exc, "error")
+                raise ValueError("delete_disk_failed") from exc
+
+            with self.db() as db:
+                if row["channel_id"]:
+                    db.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (row["channel_id"], video_id))
+                db.execute("DELETE FROM video WHERE id=?", (video_id,))
+
+    def clear_video_cache(self, row, staged):
+        if self.playback.resolve() != self.playback:
+            raise ValueError("delete_invalid_folder")
+        for cached in self.playback.glob(f"{row['id']}-*"):
+            cached.unlink(missing_ok=True)
+        metadata = json.loads(row["metadata"])
+        picture = staged / metadata["filename"]
+        if picture.is_file():
+            for code, name in metadata.get("audio_tracks", {}).items():
+                audio = staged / name
+                if audio.is_file():
+                    legacy = self.playback / self.playback_cache_name(row["id"], code, picture, audio)
+                    legacy.unlink(missing_ok=True)
+
+    def restore_video(self, video_id):
+        with self.files_lock, self.db() as db:
+            row = db.execute("SELECT * FROM video WHERE id=? AND state='removed'", (video_id,)).fetchone()
+            if row is None:
+                abort(404)
+            if not (self.video_bundle(row) / json.loads(row["metadata"])["filename"]).is_file():
+                raise ValueError("restore_media_missing")
+            db.execute("UPDATE video SET state='ready' WHERE id=?", (video_id,))
+        self.changed.set()
 
 
 def library_video(row, db):
@@ -650,6 +777,12 @@ def create_app(data=None, root=None, workers=True):
         if not isinstance(value, dict):
             raise BadRequest()
         return value
+
+    def local_change():
+        origin = request.headers.get("Origin")
+        if origin and origin != request.host_url.rstrip("/"):
+            abort(403)
+        return body()
 
     @app.errorhandler(ValueError)
     def invalid(exc):
@@ -691,6 +824,31 @@ def create_app(data=None, root=None, workers=True):
         with archive.db() as db:
             db.execute("UPDATE settings SET prefs=? WHERE id=1", (encode(prefs),))
         return jsonify(prefs)
+
+    @app.get("/api/system")
+    def system_status():
+        with archive.db() as db:
+            events = [dict(row) for row in db.execute("SELECT * FROM system_event ORDER BY id DESC LIMIT 50")]
+        return jsonify(yt_dlp=archive.dependency_status(), events=events)
+
+    @app.post("/api/system/yt-dlp")
+    def update_yt_dlp():
+        local_change()
+        if not archive.dependency_lock.acquire(blocking=False):
+            return jsonify(error="dependency_busy"), 409
+        threading.Thread(target=archive.update_dependency, daemon=True, name="yt-dlp-update").start()
+        return jsonify(ok=True), 202
+
+    @app.post("/api/system/yt-dlp/restart")
+    def restart_yt_dlp():
+        local_change()
+        status = archive.dependency_status()
+        if not status["can_restart"] or not status["pending"] or not archive.dependency_lock.acquire(blocking=False):
+            return jsonify(error="restart_unavailable"), 409
+        timer = threading.Timer(1.5, os._exit, args=(0,))
+        timer.daemon = True
+        timer.start()
+        return jsonify(ok=True), 202
 
     @app.post("/api/scans")
     def start_scan():
@@ -901,6 +1059,8 @@ def create_app(data=None, root=None, workers=True):
                     channel_id=?,prefs=?,capture_overrides=? WHERE id=? AND state='failed'""",
                                     (url, kind, channel["id"] if channel else None, encode(prefs),
                                      encode(overrides), video_id)).rowcount
+                if not queued and db.execute("SELECT 1 FROM video WHERE id=? AND state='removed'", (video_id,)).fetchone():
+                    return jsonify(error="restore_removed_first"), 409
         archive.changed.set()
         return jsonify(id=video_id, queued=queued)
 
@@ -909,7 +1069,7 @@ def create_app(data=None, root=None, workers=True):
         state = request.args.get("state", "ready")
         scope = request.args.get("scope", "")
         term = request.args.get("q", "").strip()
-        states = ("queued", "running", "failed") if state == "jobs" else ("ready",)
+        states = {"jobs": ("queued", "running", "failed"), "removed": ("removed",)}.get(state, ("ready",))
         params = [*states, term]
         where = f"state IN ({','.join('?' for _ in states)}) AND instr(fold(title),fold(?))>0"
         order = "created DESC,rowid DESC"
@@ -930,6 +1090,20 @@ def create_app(data=None, root=None, workers=True):
             rows = db.execute(f"SELECT * FROM video WHERE {where} ORDER BY {order} LIMIT 60 OFFSET ?",
                               (*params, 60 * (page - 1)))
             return jsonify(total=total, videos=[library_video(row, db) for row in rows])
+
+    @app.delete("/api/videos/<video_id>")
+    def remove_video(video_id):
+        disk = local_change().get("disk")
+        if type(disk) is not bool:
+            raise ValueError("invalid_delete_option")
+        archive.remove_video(video_id, disk)
+        return jsonify(ok=True)
+
+    @app.post("/api/videos/<video_id>/restore")
+    def restore_video(video_id):
+        local_change()
+        archive.restore_video(video_id)
+        return jsonify(ok=True)
 
     @app.get("/api/videos/<video_id>/tracks")
     def saved_tracks(video_id):

@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -11,9 +12,15 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import dependencies
+
+
+DEPENDENCY_STARTUP_ERROR = dependencies.activate(os.environ.get("DATA_DIR", "./data"))
+
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
 from yt_dlp.networking.exceptions import HTTPError
+from yt_dlp.version import __version__ as YT_DLP_VERSION
 
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}\Z")

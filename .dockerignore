@@ -3,5 +3,6 @@
 !requirements.txt
 !app.py
 !collector.py
+!dependencies.py
 !static/
 !static/**

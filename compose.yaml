@@ -1,12 +1,13 @@
 services:
   untube:
-    image: gridtube:0.5.1
+    image: gridtube:0.6
     build: .
     ports:
       - "${GRIDTUBE_BIND:-${UNTUBE_BIND:-127.0.0.1}}:${GRIDTUBE_PORT:-${UNTUBE_PORT:-3987}}:8080"
     environment:
       DATA_DIR: /data
       ARCHIVE_DIR: /archive
+      GRIDTUBE_RESTART_IN_DOCKER: "1"
     volumes:
       - ./data:/data
       - ./archive:/archive

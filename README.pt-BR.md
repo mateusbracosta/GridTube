@@ -31,6 +31,8 @@ O Compose recria o container quando a imagem muda. A biblioteca, o banco e as co
 - **Baixar por link** pode guardar em um canal ou em **Avulsos**. Em **Opções para este vídeo**, escolha modo de download, limite de resolução no modo compacto, áudio e legendas. Os campos deixados em **Usar padrão** herdam as preferências do canal ou os padrões globais. Em **Downloads**, use **Editar opções e tentar novamente** para ajustar uma tentativa que falhou. **Tentar novamente** reutiliza as escolhas individuais já feitas. Abra o menu de organização de um vídeo para mover a pasta para outro canal, criar um canal local e já mover o vídeo, ou criar/adicionar a uma playlist. Uma playlist aponta para o vídeo da biblioteca, com uma única cópia física.
 - **PT-BR / EN** alterna o idioma da interface naquele navegador. O player local oferece legendas, capítulos quando disponíveis e retomada de posição.
 
+Em **Organizar vídeo → Excluir vídeo**, escolha **Remover da biblioteca** para manter os arquivos e restaurar o vídeo depois em **Removidos**. **Excluir também do disco** apaga a pasta daquele vídeo e seus arquivos auxiliares. Para excluir no disco, o Docker precisa de acesso de escrita à montagem do acervo.
+
 ### Modo de download
 
 - **Compacto** é o padrão. Dentro do limite configurado, o app encontra a melhor resolução e taxa de quadros disponíveis e prioriza o menor tamanho estimado entre as variantes comparáveis. A opção de resolução **Melhor disponível** mantém a seleção compacta sem fixar um teto.
@@ -81,12 +83,16 @@ Para levar só a mídia, copie `archive/library` ou as pastas desejadas. Para us
 Com o serviço parado, copie `data/` e `archive/library/` para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.5.1.tar gridtube:0.5.1
-docker load -i gridtube-0.5.1.tar
+docker save -o gridtube-0.6.tar gridtube:0.6
+docker load -i gridtube-0.6.tar
 docker compose up -d --no-build --pull never
 ~~~
 
 A interface, a busca, a organização e o player usam recursos locais. A leitura de um catálogo remoto, o acompanhamento de canais e a captura usam internet.
+
+## Manutenção do yt-dlp
+
+Em **Configurações → Sistema**, use **Atualizar yt-dlp** para consultar a versão estável do PyPI. O GridTube testa a instalação e mostra a versão pronta. No Docker, **Reiniciar e aplicar** ativa a versão baixada. O reinício interrompe a reprodução e a fila retoma os trabalhos pendentes. A atualização fica no volume `data/`. Consulte o **Registro de atividade** para ver resultados e falhas recentes.
 
 
 GridTube é um projeto independente inspirado pelo [UnTube](https://github.com/tomfriart/untube).
