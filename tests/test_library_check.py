@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import collector
 from app import create_app
@@ -104,3 +105,67 @@ class LibraryCheckTests(unittest.TestCase):
         self.assertEqual(sum(self.check().values()), 0)
         self.assertEqual(self.client.get("/api/videos?state=removed").json["total"], 1)
         self.assertTrue(self.picture.is_file())
+
+    def test_delete_saved_subtitle_and_failed_attempt_independently(self):
+        tracks = self.url + "/tracks"
+        with self.archive.db() as db:
+            db.execute("""INSERT INTO track_job (video_id,kind,code,allow_auto,exact,state,error)
+                VALUES (?,'subtitle','en',1,1,'failed','track_rate_limited')""", (self.video_id,))
+        self.assertTrue(self.client.delete(tracks + "/subtitle/en", json={"saved": False}).json["removed"])
+        self.assertTrue(self.subtitle.is_file())
+        self.assertEqual(self.client.get(tracks).json["jobs"], [])
+        self.assertTrue(self.client.delete(tracks + "/subtitle/en", json={"saved": True}).json["removed"])
+        self.assertFalse(self.subtitle.exists())
+        self.assertTrue(self.picture.is_file())
+        self.assertEqual(self.client.get(tracks).json["video"]["subtitles"], {})
+        self.assertEqual(json.loads((self.folder / "video.json").read_text(encoding="utf-8"))["subtitles"], {})
+        self.assertFalse(self.client.delete(tracks + "/subtitle/en", json={"saved": True}).json["removed"])
+
+    def test_delete_audio_removes_cache_but_keeps_main_file(self):
+        audio = self.folder / "Fixture.en.m4a"
+        audio.write_bytes(b"extra audio")
+        cache = self.archive.playback / f"{self.video_id}-example.mp4"
+        cache.write_bytes(b"derived playback")
+        with self.archive.db() as db:
+            row = self.archive.ready_video(db, self.video_id)
+            metadata = json.loads(row["metadata"])
+            metadata["audio_tracks"] = {"en": audio.name}
+            self.archive.save_video_metadata(db, row, metadata)
+        self.assertTrue(self.client.delete(self.url + "/tracks/audio/en", json={"saved": True}).json["removed"])
+        self.assertFalse(audio.exists())
+        self.assertFalse(cache.exists())
+        self.assertTrue(self.subtitle.is_file())
+        self.assertTrue(self.picture.is_file())
+        self.assertEqual(self.client.get(f"/playback/{self.video_id}/en").status_code, 404)
+
+    def test_failed_manifest_write_restores_deleted_track(self):
+        with patch.object(collector, "write_manifest", side_effect=OSError("read only")), self.assertLogs(level="ERROR"):
+            response = self.client.delete(self.url + "/tracks/subtitle/en", json={"saved": True})
+        self.assertEqual(response.json["error"], "track_delete_failed")
+        self.assertTrue(self.subtitle.is_file())
+        self.assertEqual(self.client.get(self.url + "/tracks").json["video"]["subtitles"], {"en": self.subtitle.name})
+
+    def test_original_thumbnail_replaces_frame_and_is_stable_after_progress(self):
+        fallback = self.folder / "Fixture-thumb.jpg"
+        fallback.write_bytes(b"old frame")
+        with self.archive.db() as db:
+            row = self.archive.ready_video(db, self.video_id)
+            metadata = json.loads(row["metadata"])
+            metadata["thumbnail"] = fallback.name
+            self.archive.save_video_metadata(db, row, metadata)
+
+        def get_thumbnail(video_id, directory):
+            name = "youtube-thumbnail.jpg"
+            (directory / name).write_bytes(b"original cover")
+            return name
+
+        with patch.object(collector, "save_video_thumbnail", side_effect=get_thumbnail):
+            self.archive.update_video_thumbnail(self.video_id)
+        self.assertFalse(fallback.exists())
+        before = self.client.get("/api/videos?summary=1").json["videos"][0]
+        self.client.post(self.url + "/progress", json={"position": 75})
+        after = self.client.get("/api/videos?summary=1").json["videos"][0]
+        self.assertEqual(after["position"], 75)
+        self.assertEqual(before["thumbnail"], after["thumbnail"])
+        with self.client.get(f"/media/{self.video_id}/{after['thumbnail']}") as response:
+            self.assertEqual(response.data, b"original cover")

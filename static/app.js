@@ -190,6 +190,10 @@ const translations = {
   track_unavailable: ["Esta faixa está indisponível.","This track is unavailable."],
   track_invalid: ["A origem não enviou uma legenda legível.","The source did not return a readable subtitle."],
   track_failed: ["Não foi possível obter a faixa.","Could not retrieve the track."],
+  deleteTrack: ["Apagar faixa do disco","Delete track from disk"],
+  deleteTrackAttempt: ["Apagar tentativa","Delete attempt"],
+  track_active: ["Esta faixa está sendo baixada. Aguarde a conclusão.","This track is downloading. Wait for it to finish."],
+  track_delete_failed: ["Não foi possível apagar a faixa do disco.","Could not delete the track from disk."],
   playbackError: ["Não foi possível abrir esta faixa. Voltando ao áudio do arquivo.","Could not play this track. Returning to the saved audio."],
   videoPlaybackError: ["O navegador não conseguiu reproduzir o arquivo salvo. Tente outro player compatível com o formato.","The browser could not play the saved file. Try another player that supports its format."],
   invalid_description: ["Use até 5.000 caracteres.","Use up to 5,000 characters."],
@@ -241,7 +245,8 @@ const paths = {
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
   back:'<path d="m11 5-7 7 7 7M4 12h16"/>',
   theater:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M6 17h12"/>',
-  gear:'<path d="M10 3h4l.6 2.5 1.5.9 2.5-.7 2 3.4-1.8 1.8v1.8l1.8 1.8-2 3.4-2.5-.7-1.5.9L14 21h-4l-.6-2.5-1.5-.9-2.5.7-2-3.4L5.2 13v-1.8L3.4 9.4l2-3.4 2.5.7 1.5-.9z"/><circle cx="12" cy="12" r="3"/>'
+  gear:'<path d="M10 3h4l.6 2.5 1.5.9 2.5-.7 2 3.4-1.8 1.8v1.8l1.8 1.8-2 3.4-2.5-.7-1.5.9L14 21h-4l-.6-2.5-1.5-.9-2.5.7-2-3.4L5.2 13v-1.8L3.4 9.4l2-3.4 2.5.7 1.5-.9z"/><circle cx="12" cy="12" r="3"/>',
+  trash:'<path d="M4 7h16m-14 0 1 14h10l1-14M9 7V3h6v4m-5 4v6m4-6v6"/>'
 };
 const get = id => document.getElementById(id);
 const app = get("app"), modal = get("modal"), notice = get("notice");
@@ -1023,6 +1028,7 @@ function watch(item, initialJobs=[], autoplay=false) {
     }
     flash(t("playbackError"));
     saved.querySelector("[name=watchAudio]").value = "";
+    saved.querySelector('[data-remove-track][data-kind="audio"]').hidden = true;
     changeAudio("",requestedTime,resume);
   };
   player.ontimeupdate = ()=>{if(Math.abs(player.currentTime-last)>=10) update(player.currentTime);};
@@ -1033,6 +1039,17 @@ function watch(item, initialJobs=[], autoplay=false) {
   async function queue(kind,code,retry=false) {
     const result = await api(endpoint,"POST",{kind,code,retry});
     if (result.queued) flash(t("queuedState"));
+    await poll();
+  }
+
+  const trackTrash = (kind, code, savedTrack) => {
+    const title = t(savedTrack ? "deleteTrack" : "deleteTrackAttempt");
+    return `<button type="button" class="flat track-trash" data-remove-track data-kind="${kind}" data-code="${esc(code)}"
+      title="${title}" aria-label="${title}" ${savedTrack&&!code?"hidden":""}>${icon("trash")}</button>`;
+  };
+  async function deleteTrack(button, savedTrack) {
+    const {kind,code} = button.dataset;
+    await api(`${endpoint}/${kind}/${encodeURIComponent(code)}`,"DELETE",{saved:savedTrack});
     await poll();
   }
 
@@ -1079,13 +1096,16 @@ function watch(item, initialJobs=[], autoplay=false) {
     const newSignature = JSON.stringify([video.audio,audioTracks,subtitles]);
     if (signature !== newSignature) {
       signature = newSignature;
-      saved.innerHTML = select("watchAudio",t("watchAudio"),
+      if (audio && !audioTracks[audio]) changeAudio("");
+      if (subtitle && !subtitles[subtitle]) subtitle = "";
+      saved.innerHTML = `<div class="saved-track">${select("watchAudio",t("watchAudio"),
         [["",video.audio?languageName(video.audio):t("originalSaved")],
-         ...Object.keys(audioTracks).map(tag=>[tag,languageName(tag)])],audio)
-        + select("watchSubtitles",t("watchSubtitles"),
-          [["",t("none")],...Object.keys(subtitles).map(tag=>[tag,languageName(tag)])],subtitle);
-      saved.querySelector("[name=watchAudio]").onchange = event=>changeAudio(event.target.value);
-      saved.querySelector("[name=watchSubtitles]").onchange = event=>{subtitle=event.target.value;setSubtitle();};
+         ...Object.keys(audioTracks).map(tag=>[tag,languageName(tag)])],audio)}${trackTrash("audio",audio,true)}</div>
+        <div class="saved-track">${select("watchSubtitles",t("watchSubtitles"),
+          [["",t("none")],...Object.keys(subtitles).map(tag=>[tag,languageName(tag)])],subtitle)}${trackTrash("subtitle",subtitle,true)}</div>`;
+      for (const node of player.querySelectorAll("track")) {
+        if (!subtitles[node.srclang]) node.remove();
+      }
       for (const [tag,filename] of Object.entries(subtitles)) {
         if ([...player.querySelectorAll("track")].some(node=>node.srclang===tag)) continue;
         const track = document.createElement("track");
@@ -1106,7 +1126,7 @@ function watch(item, initialJobs=[], autoplay=false) {
       trackSignature = newJobs;
       get("track-jobs").innerHTML = jobs.filter(job=>job.state!=="ready").map(job=>`
         <div class="track-job"><span>${esc(languageName(job.code))} · ${t(job.kind==="audio"?"watchAudio":"subtitleDownload")}<small>${esc(t(job.error || (job.state==="queued"?"queuedState":job.state)))}</small></span>
-        ${job.state==="failed"?(waiting(job)?`<small>${t("retryAfter")} ${new Date(job.retry_at*1000).toLocaleTimeString(locale,{hour:"2-digit",minute:"2-digit"})}</small>`:`<button type="button" data-kind="${job.kind}" data-code="${esc(job.code)}">${t("retry")}</button>`):""}</div>`).join("");
+        ${job.state==="failed"?`<div class="track-actions">${waiting(job)?`<small>${t("retryAfter")} ${new Date(job.retry_at*1000).toLocaleTimeString(locale,{hour:"2-digit",minute:"2-digit"})}</small>`:`<button type="button" data-kind="${job.kind}" data-code="${esc(job.code)}">${t("retry")}</button>`}${trackTrash(job.kind,job.code,false)}</div>`:""}</div>`).join("");
     }
 
     const newAvailable = JSON.stringify([signature,trackSignature,offered]);
@@ -1165,11 +1185,30 @@ function watch(item, initialJobs=[], autoplay=false) {
     } catch(error) { status.textContent=t(error.message); }
     finally {button.disabled=false;}
   };
+  saved.onchange = event=>{
+    const input = event.target;
+    const button = input.closest(".saved-track").querySelector("[data-remove-track]");
+    button.dataset.code = input.value;
+    button.hidden = !input.value;
+    if (input.name === "watchAudio") changeAudio(input.value);
+    else { subtitle = input.value; setSubtitle(); }
+  };
+  saved.onclick = async event=>{
+    const button = event.target.closest("[data-remove-track]");
+    if (!button) return;
+    button.disabled = true;
+    try { await deleteTrack(button,true); }
+    catch (error) { flash(t(error.message)); }
+    finally { button.disabled = false; }
+  };
   get("track-jobs").onclick = async event=>{
     const button=event.target.closest("[data-code]");
     if(!button) return;
     button.disabled=true;
-    try { await queue(button.dataset.kind,button.dataset.code,true); }
+    try {
+      if (button.hasAttribute("data-remove-track")) await deleteTrack(button,false);
+      else await queue(button.dataset.kind,button.dataset.code,true);
+    }
     catch(error) { flash(t(error.message)); }
     finally {button.disabled=false;}
   };

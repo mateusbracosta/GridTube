@@ -645,7 +645,8 @@ class Archive:
         with self.db() as db:
             pending = db.execute("""SELECT v.id FROM video v LEFT JOIN channel_profile p
                 ON p.source=json_extract(v.metadata,'$.source_channel_url')
-                WHERE v.state='ready' AND (json_extract(v.metadata,'$.audio_label_source') IS NULL
+                WHERE v.state='ready' AND (json_extract(v.metadata,'$.thumbnail_source') IS NOT 'youtube'
+                    OR json_extract(v.metadata,'$.audio_label_source') IS NULL
                     OR json_extract(v.metadata,'$.source_channel_url') IS NULL OR p.source IS NULL)
                 ORDER BY v.created DESC LIMIT 40""").fetchall()
         for row in pending:
@@ -653,6 +654,7 @@ class Archive:
 
     def hydrate_video_origin(self, video_id):
         try:
+            self.update_video_thumbnail(video_id)
             with self.files_lock, self.db() as db:
                 row = self.ready_video(db, video_id)
                 metadata = json.loads(row["metadata"])
@@ -684,6 +686,29 @@ class Archive:
                     self.refresh_profile(source)
         except Exception:
             logging.warning("Could not refresh saved video identity for %s", video_id, exc_info=True)
+
+    def update_video_thumbnail(self, video_id):
+        with self.db() as db:
+            row = self.ready_video(db, video_id)
+            if json.loads(row["metadata"]).get("thumbnail_source") == "youtube":
+                return
+        with tempfile.TemporaryDirectory(prefix="thumbnail-", dir=self.work) as temp:
+            name = collector.save_video_thumbnail(video_id, Path(temp))
+            if not name:
+                return
+            with self.files_lock:
+                if self.exporting[video_id]:
+                    return
+                with self.db() as db:
+                    row = self.ready_video(db, video_id)
+                    metadata = json.loads(row["metadata"])
+                    bundle = self.video_bundle(row)
+                    previous = metadata.get("thumbnail")
+                    (Path(temp) / name).replace(self.playlist_asset(bundle, name))
+                    metadata.update(thumbnail=name, thumbnail_source="youtube")
+                    self.save_video_metadata(db, row, metadata)
+                if previous and previous != name and previous.endswith("-thumb.jpg"):
+                    self.playlist_asset(bundle, previous).unlink(missing_ok=True)
 
     def ready_video(self, db, video_id):
         row = db.execute("SELECT * FROM video WHERE id=? AND state='ready'", (video_id,)).fetchone()
@@ -722,6 +747,58 @@ class Archive:
                 self.save_video_metadata(db, row, metadata)
                 db.execute("UPDATE track_job SET state='ready',resolved=?,error=NULL,retry_at=0 WHERE rowid=?",
                            (resolved, job["job_id"]))
+
+    def remove_track(self, video_id, kind, code, saved):
+        with self.files_lock:
+            if not saved:
+                with self.db() as db:
+                    return bool(db.execute("""DELETE FROM track_job WHERE video_id=? AND kind=?
+                        AND code=? AND state='failed'""", (video_id, kind, code)).rowcount)
+            if self.exporting[video_id]:
+                raise ValueError("playlist_export_busy")
+            with tempfile.TemporaryDirectory(prefix="delete-track-", dir=self.work) as temp:
+                staged = Path(temp) / "track"
+                manifest_changed = False
+                try:
+                    with self.db() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        row = self.ready_video(db, video_id)
+                        metadata = json.loads(row["metadata"])
+                        key = "audio_tracks" if kind == "audio" else "subtitles"
+                        tracks = metadata.get(key, {})
+                        filename = tracks.get(code)
+                        if not filename:
+                            return False
+                        active = db.execute("""SELECT code,exact FROM track_job
+                            WHERE video_id=? AND kind=? AND state='running'""", (video_id, kind))
+                        if any(job["code"] == code or not job["exact"] and collector.language_score(code, job["code"])
+                               for job in active):
+                            raise ValueError("track_active")
+                        bundle = self.video_bundle(row)
+                        source = self.playlist_asset(bundle, filename)
+                        if (filename in {metadata["filename"], metadata.get("thumbnail")}
+                                or source.suffix != (".m4a" if kind == "audio" else ".vtt")):
+                            raise ValueError("invalid_track")
+                        if kind == "audio":
+                            self.clear_video_cache(row, bundle)
+                        try:
+                            source.rename(staged)
+                        except FileNotFoundError:
+                            pass
+                        aliases = [tag for tag, asset in tracks.items() if asset == filename]
+                        for tag in aliases:
+                            del tracks[tag]
+                            db.execute("""DELETE FROM track_job WHERE video_id=? AND kind=?
+                                AND (code=? OR resolved=?)""", (video_id, kind, tag, tag))
+                        self.save_video_metadata(db, row, metadata)
+                        manifest_changed = True
+                except Exception:
+                    if staged.exists():
+                        staged.rename(source)
+                    if manifest_changed:
+                        collector.write_manifest(bundle, json.loads(row["metadata"]))
+                    raise
+            return True
 
     def playback_variant(self, video_id, code):
         with self.playback_lock, self.files_lock:
@@ -1635,7 +1712,8 @@ def create_app(data=None, root=None, workers=True):
             jobs = [dict(job) for job in db.execute(
                 "SELECT kind,code,state,resolved,error,retry_at FROM track_job WHERE video_id=? ORDER BY rowid", (video_id,))]
             video = library_video(row, db)
-        if workers and (not video.get("audio_label_source") or not video.get("source_profile")):
+        if workers and (video.get("thumbnail_source") != "youtube"
+                        or not video.get("audio_label_source") or not video.get("source_profile")):
             archive.schedule_video_origin(video_id)
         return jsonify(video=video, jobs=jobs)
 
@@ -1682,6 +1760,18 @@ def create_app(data=None, root=None, workers=True):
                           (video_id, kind, code))
         archive.changed.set()
         return jsonify(queued=bool(cursor.rowcount))
+
+    @app.delete("/api/videos/<video_id>/tracks/<kind>/<code>")
+    def remove_track(video_id, kind, code):
+        saved = local_change().get("saved")
+        if (kind not in {"audio", "subtitle"} or not collector.LANGUAGE_TAG.fullmatch(code)
+                or not collector.VIDEO_ID.fullmatch(video_id) or type(saved) is not bool):
+            raise ValueError("invalid_track")
+        try:
+            return jsonify(removed=archive.remove_track(video_id, kind, code, saved))
+        except OSError:
+            logging.exception("Could not delete an audio or subtitle track")
+            return jsonify(error="track_delete_failed"), 409
 
     @app.get("/playback/<video_id>/<code>")
     def alternate_playback(video_id, code):

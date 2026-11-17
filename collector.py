@@ -21,7 +21,7 @@ DEPENDENCY_STARTUP_ERROR = dependencies.activate(os.environ.get("DATA_DIR", "./d
 
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
-from yt_dlp.networking.exceptions import HTTPError
+from yt_dlp.networking.exceptions import HTTPError, RequestError
 from yt_dlp.version import __version__ as YT_DLP_VERSION
 
 
@@ -166,12 +166,12 @@ def fetch_channel_profile(source):
         return channel_profile(downloader.extract_info(source, download=False))
 
 
-def save_channel_image(url, directory, name):
+def save_channel_image(url, directory, name, timeout=20):
     parsed = urlsplit(url)
     host = parsed.hostname or ""
     if parsed.scheme != "https" or not host.endswith((".googleusercontent.com", ".ggpht.com", ".ytimg.com")):
         return None
-    with YoutubeDL(options()) as downloader, downloader.urlopen(url) as response:
+    with YoutubeDL({**options(), "socket_timeout": timeout}) as downloader, downloader.urlopen(url) as response:
         headers = response.headers
         media_type = headers.get("Content-Type", "").split(";")[0]
         suffix = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
@@ -186,6 +186,15 @@ def save_channel_image(url, directory, name):
         staged.write(content)
     Path(staged.name).replace(directory / filename)
     return filename
+
+
+def save_video_thumbnail(video_id, directory):
+    if not VIDEO_ID.fullmatch(video_id):
+        return None
+    try:
+        return save_channel_image(f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg", directory, "youtube-thumbnail", timeout=5)
+    except (OSError, RequestError):
+        return None
 
 
 def track_inventory(info, automatic=True):
@@ -611,14 +620,19 @@ def download(url, prefs, work, bundle, progress, *, on_title):
     mux_video(source, target, label["audio"], audio_source, progress=remuxed if expected else None)
     progress("mux", 100)
     progress("thumbnail")
-    try:
-        ffmpeg("-filter_threads", "1", "-threads", "1", "-ss", min(5, (info.get("duration") or 0) / 3),
-               "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", bundle / f"{stem}-thumb.jpg")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass
+    thumbnail = save_video_thumbnail(info["id"], bundle)
+    thumbnail_source = "youtube" if thumbnail else "frame"
+    if not thumbnail:
+        fallback = bundle / f"{stem}-thumb.jpg"
+        try:
+            ffmpeg("-filter_threads", "1", "-threads", "1", "-ss", min(5, (info.get("duration") or 0) / 3),
+                   "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", fallback)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            pass
+        thumbnail = fallback.name if fallback.is_file() else None
     return {
         **video_metadata(info), "id": info["id"], "filename": target.name,
-        "thumbnail": f"{stem}-thumb.jpg" if (bundle / f"{stem}-thumb.jpg").is_file() else None,
+        "thumbnail": thumbnail, "thumbnail_source": thumbnail_source,
         "duration": info.get("duration"), "source": url, "chapters": info.get("chapters") or [],
         "download_mode": mode, "video_codec": video_codec, "audio_codec": audio_codec,
         "width": picture.get("width"), "height": picture["height"], "fps": picture.get("fps"),

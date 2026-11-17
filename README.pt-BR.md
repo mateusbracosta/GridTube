@@ -69,6 +69,8 @@ Com foco fora dos campos e botões, **K** ou **Espaço** pausa e retoma. **←/�
 
 Na engrenagem **Áudio e legendas**, dentro do vídeo, use **Buscar mais idiomas** para ver as faixas disponíveis na origem e baixar áudios ou legendas adicionais. Depois de salvas, **Faixa de áudio** e **Legenda em exibição** alternam entre as opções locais. Se uma legenda falhar, o vídeo permanece disponível e a faixa pode ser tentada novamente. A dublagem depende das faixas que o YouTube oferece.
 
+A lixeira ao lado de uma faixa adicional selecionada apaga seu arquivo do HD. Ao lado de uma tentativa com erro, a lixeira limpa a tentativa. O áudio que faz parte do arquivo de vídeo continua disponível.
+
 Canais conectados ao YouTube têm foto, capa e descrição armazenadas localmente. Em vídeos avulsos, o player usa o nome e a foto do canal obtidos pelo identificador oficial da origem. Para ligar um canal criado no app a uma origem, informe o link em **Editar canal**.
 
 Consulte a [arquitetura e operação](ARQUITETURA.md) para ver fluxos, persistência, rotas e recuperação.
@@ -95,6 +97,8 @@ data/
 
 Cada captura publica um MP4 ou WebM com os fluxos baixados da origem. `video.json` registra o modo, os codecs e a resolução. Miniatura e legendas acompanham o vídeo quando disponíveis. A reprodução direta depende do suporte ao formato no navegador ou cliente Jellyfin. O nome da pasta do canal é definido na criação e permanece estável quando o nome exibido é editado. Os arquivos temporários ficam em `archive/work`, fora da biblioteca.
 
+O GridTube salva a miniatura do YouTube localmente quando disponível. Se a capa original estiver indisponível, usa uma imagem gerada do vídeo. A posição assistida aparece na barra do cartão e é usada para retomar a reprodução.
+
 Para levar só a mídia, copie `library/` dentro da pasta do acervo ou as pastas desejadas. Para usar com Jellyfin, monte essa `library/` em modo somente leitura e aponte uma biblioteca do tipo **Vídeos domésticos e fotos** para esse caminho. O app e o Jellyfin mantêm catálogos independentes, incluindo playlists e progresso. Faça o rescan do Jellyfin depois de mover arquivos.
 
 Cada playlist tem um `playlist.m3u8` em UTF-8 na pasta `Playlists/` do acervo. Copie `library/` e `Playlists/` juntas para manter os caminhos relativos. Para levar só uma playlist, use **Exportar playlist em ZIP** no cabeçalho dela. O ZIP inclui a lista, os vídeos e os arquivos auxiliares disponíveis, com caminhos relativos à pasta extraída.
@@ -114,8 +118,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.5.tar gridtube:0.7.5
-docker load -i gridtube-0.7.5.tar
+docker save -o gridtube-0.7.6.tar gridtube:0.7.6
+docker load -i gridtube-0.7.6.tar
 docker compose up -d --no-build --pull never
 ~~~
 

@@ -62,7 +62,7 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.5 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.6 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 
