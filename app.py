@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS playlist_entry (
     PRIMARY KEY(source,playlist_id,video_id)
 );
 CREATE INDEX IF NOT EXISTS playlist_entry_video ON playlist_entry(source,video_id);
+CREATE INDEX IF NOT EXISTS playlist_item_video ON playlist_item(video_id,playlist_id);
 CREATE TABLE IF NOT EXISTS seen (
     channel_id TEXT NOT NULL REFERENCES channel(id) ON DELETE CASCADE, id TEXT NOT NULL,
     PRIMARY KEY(channel_id,id)
@@ -209,12 +210,7 @@ class Archive:
             if collector.DEPENDENCY_STARTUP_ERROR:
                 system_event(db, "dependency", collector.DEPENDENCY_STARTUP_ERROR, severity="error")
             db.execute("UPDATE scan SET state='error', error='interrupted' WHERE state='loading'")
-            pending = db.execute("SELECT * FROM video WHERE pending_folder IS NOT NULL").fetchall()
-            for item in pending:
-                self.finish_publish(db, item)
-            db.execute("""UPDATE video SET state='queued',percent=0,progress_phase=NULL,progress_estimated=0
-                          WHERE state='running'""")
-            db.execute("UPDATE track_job SET state='queued' WHERE state='running'")
+            self.recover_downloads(db)
             db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,progress_phase=NULL,progress_estimated=0
                           WHERE state='failed' AND (lower(error) LIKE '%unable to download video subtitles%'
                             OR error LIKE '%Postprocessing: Conversion failed!%')""")
@@ -256,13 +252,19 @@ class Archive:
             return
         try:
             self.playlist_directory.mkdir(exist_ok=True)
+        except OSError:
+            logging.exception("Could not create the on-disk playlist directory")
             with self.db() as db:
-                if playlist_ids is None:
-                    playlist_ids = [row["id"] for row in db.execute("SELECT id FROM playlist")]
-                for playlist_id in playlist_ids:
-                    playlist = db.execute("SELECT name FROM playlist WHERE id=?", (playlist_id,)).fetchone()
-                    if not playlist:
-                        continue
+                system_event(db, "library", "playlist_write_failed", severity="error")
+            return
+        with self.db() as db:
+            if playlist_ids is None:
+                playlist_ids = [row["id"] for row in db.execute("SELECT id FROM playlist")]
+            for playlist_id in playlist_ids:
+                playlist = db.execute("SELECT name FROM playlist WHERE id=?", (playlist_id,)).fetchone()
+                if not playlist:
+                    continue
+                try:
                     paths = []
                     for row in self.playlist_rows(db, playlist_id):
                         video = self.playlist_asset(self.video_bundle(row), json.loads(row["metadata"])["filename"])
@@ -271,10 +273,9 @@ class Archive:
                     if folder.resolve() != folder:
                         raise ValueError("playlist_write_failed")
                     playlist_files.write_m3u(folder, paths)
-        except (OSError, KeyError, ValueError):
-            logging.exception("Could not update the on-disk playlists")
-            with self.db() as db:
-                system_event(db, "library", "playlist_write_failed", severity="error")
+                except (OSError, KeyError, ValueError, TypeError, RuntimeError):
+                    logging.exception("Could not update the on-disk playlist %s", playlist_id)
+                    system_event(db, "library", "playlist_write_failed", playlist_id, "error")
 
     def refresh_video_playlists(self, video_id):
         with self.db() as db:
@@ -794,20 +795,48 @@ class Archive:
             time.sleep(20)
 
     def finish_publish(self, db, row):
-        target = self.library / row["pending_folder"]
-        if (target / "video.json").is_file():
-            meta = json.loads((target / "video.json").read_text(encoding="utf-8"))
-            if not (target / meta["filename"]).is_file():
-                raise RuntimeError("Published bundle is missing its video")
-            db.execute("""UPDATE video SET folder=pending_folder, channel_id=pending_channel,
-                          pending_folder=NULL,pending_channel=NULL,state='ready',metadata=?,
-                          title=?,percent=100,error=NULL,progress_phase=NULL,progress_estimated=0 WHERE id=?""",
-                       (encode(meta), meta["title"], row["id"]))
-            if row["state"] != "ready":
-                self.queue_default_subtitles(db, row)
-                system_event(db, "downloads", "download_completed", meta["title"])
-        else:
+        target = self.video_bundle({"folder": row["pending_folder"], "id": row["id"]})
+        if not target.exists():
             db.execute("UPDATE video SET pending_folder=NULL,pending_channel=NULL WHERE id=?", (row["id"],))
+            return None
+        manifest = self.playlist_asset(target, "video.json")
+        meta = json.loads(manifest.read_text(encoding="utf-8"))
+        if not self.playlist_asset(target, meta["filename"]).is_file() or not isinstance(meta["title"], str):
+            raise ValueError("publish_incomplete")
+        db.execute("""UPDATE video SET folder=pending_folder, channel_id=pending_channel,
+                      pending_folder=NULL,pending_channel=NULL,state='ready',metadata=?,
+                      title=?,percent=100,error=NULL,progress_phase=NULL,progress_estimated=0 WHERE id=?""",
+                   (encode(meta), meta["title"], row["id"]))
+        if row["state"] != "ready":
+            self.queue_default_subtitles(db, row)
+            system_event(db, "downloads", "download_completed", meta["title"])
+        return True
+
+    def recover_publication(self, db, row):
+        try:
+            return self.finish_publish(db, row)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+            original_available = False
+            if row["state"] == "ready":
+                try:
+                    original = self.video_bundle(row)
+                    original_available = self.playlist_asset(original, json.loads(row["metadata"])["filename"]).is_file()
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                    pass
+            db.execute("""UPDATE video SET pending_folder=NULL,pending_channel=NULL,state=?,error=?
+                          WHERE id=?""", ("ready" if original_available else "failed",
+                                          None if original_available else "publish_incomplete", row["id"]))
+            system_event(db, "downloads", "publish_incomplete", f"{row['id']} · {exc}", "error")
+            return False
+
+    def recover_downloads(self, db):
+        pending = db.execute("SELECT * FROM video WHERE pending_folder IS NOT NULL").fetchall()
+        for row in pending:
+            self.recover_publication(db, row)
+        db.execute("""UPDATE video SET state='queued',percent=0,progress_phase=NULL,progress_estimated=0
+                      WHERE state='running'""")
+        db.execute("UPDATE track_job SET state='queued' WHERE state='running'")
+        return [row["id"] for row in pending]
 
     def capture(self, item):
         video_id = item["id"]
@@ -837,10 +866,15 @@ class Archive:
             with self.files_lock:
                 with self.db() as db:
                     channel = self.channel(db, item["channel_id"])
-                    folder = str(Path(channel["folder"] if channel else "Avulsos") /
-                                 f"{collector.safe_name(meta['title'])} [{video_id}]")
+                    parent = Path(channel["folder"] if channel else "Avulsos")
+                    title = collector.safe_name(meta["title"])
+                    folder = parent / f"{title} [{video_id}]"
+                    suffix = 2
+                    while (self.library / folder).exists() or (self.library / folder).is_symlink():
+                        folder = parent / f"{title} ({suffix}) [{video_id}]"
+                        suffix += 1
                     db.execute("UPDATE video SET pending_folder=?,pending_channel=? WHERE id=?",
-                               (folder, item["channel_id"], video_id))
+                               (str(folder), item["channel_id"], video_id))
                 target = self.library / folder
                 target.parent.mkdir(parents=True, exist_ok=True)
                 bundle.rename(target)
@@ -854,6 +888,23 @@ class Archive:
             logging.warning("Could not clear temporary inputs for %s", video_id)
 
     def worker(self):
+        recovering = False
+        while True:
+            try:
+                if recovering:
+                    with self.files_lock:
+                        with self.db() as db:
+                            affected = self.recover_downloads(db)
+                        for video_id in affected:
+                            self.refresh_video_playlists(video_id)
+                    recovering = False
+                self.download_loop()
+            except sqlite3.OperationalError:
+                recovering = True
+                logging.warning("Download worker interrupted by SQLite; retrying", exc_info=True)
+                time.sleep(2)
+
+    def download_loop(self):
         while True:
             self.changed.clear()
             with self.db() as db:
@@ -864,6 +915,8 @@ class Archive:
             if track:
                 try:
                     self.fetch_queued_track(track)
+                except sqlite3.OperationalError:
+                    raise
                 except Exception as exc:
                     error = str(exc) if str(exc) in {"track_unavailable", "track_invalid", "track_rate_limited"} else "track_failed"
                     logging.warning("Track job failed for %s (%s): %s", track["video_id"], track["code"], error)
@@ -887,14 +940,14 @@ class Archive:
                 continue
             try:
                 self.capture(item)
+            except sqlite3.OperationalError:
+                raise
             except Exception as exc:
                 logging.exception("Capture failed for %s", item["id"])
                 with self.files_lock:
                     with self.db() as db:
                         row = db.execute("SELECT * FROM video WHERE id=?", (item["id"],)).fetchone()
-                        if row["pending_folder"] and (self.library / row["pending_folder"]).is_dir():
-                            self.finish_publish(db, row)
-                        else:
+                        if not row["pending_folder"] or self.recover_publication(db, row) is None:
                             db.execute("""UPDATE video SET state='failed',error=?,
                                           pending_folder=NULL,pending_channel=NULL WHERE id=?""",
                                        (str(exc)[-450:], item["id"]))

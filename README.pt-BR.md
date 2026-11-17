@@ -106,8 +106,8 @@ Cada playlist tem um `playlist.m3u8` em UTF-8 na pasta `Playlists/` do acervo. C
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.2.tar gridtube:0.7.2
-docker load -i gridtube-0.7.2.tar
+docker save -o gridtube-0.7.3.tar gridtube:0.7.3
+docker load -i gridtube-0.7.3.tar
 docker compose up -d --no-build --pull never
 ~~~
 

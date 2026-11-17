@@ -18,6 +18,7 @@ const translations = {
   playlist_export_busy: ["Este vídeo está em uma exportação. Tente novamente quando ela terminar.","This video is part of an export. Try again when it finishes."],
   playlist_media_missing: ["Um arquivo da playlist está ausente no acervo.","A playlist file is missing from the archive."],
   playlist_write_failed: ["Não foi possível salvar uma playlist no HD.","Could not save a playlist to disk."],
+  publish_incomplete: ["A gravação no acervo foi interrompida. Tente baixar novamente.","Saving to the archive was interrupted. Try downloading again."],
   backupTitle: ["Backup e restauração","Backup and restore"],
   backupHelp: ["Exporta o catálogo, as playlists, o progresso e as configurações. Para levar os vídeos, copie a pasta do acervo.","Exports the catalog, playlists, progress and settings. Copy the archive folder to bring the videos."],
   exportBackup: ["Exportar backup","Export backup"],

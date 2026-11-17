@@ -54,11 +54,14 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 - `data/library.sqlite` guarda canais, catálogo de origem, fila, associações e progresso. O WAL exige cópia consistente do banco. Pare o serviço antes de copiar os diretórios para backup, ou use a API de backup do SQLite para um snapshot só do banco.
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.
 - `archive/work` guarda arquivos de trabalho e variantes derivadas. O app retoma jobs que ficaram em execução após reiniciar. Na publicação e na movimentação, registra o destino pretendido no SQLite antes de renomear a pasta.
+- A recuperação valida a mídia e o manifesto antes de confirmar a publicação. Um destino incompleto é preservado e aparece como falha em Downloads quando a mídia original está ausente. Uma nova captura recebe um nome livre se a pasta planejada já existir. Uma falha operacional transitória do SQLite faz a fila revisar publicações pendentes e retomar os trabalhos em execução.
 - Em servidores pequenos, `GRIDTUBE_PLAYBACK_CACHE_MIB` limita o cache de áudios alternativos. A poda ocorre ao gerar uma variante, mantendo a variante atual. Requisições parciais de variantes já existentes não percorrem o cache; a marca de uso de cada arquivo é atualizada no máximo uma vez por minuto.
 - Remover um vídeo muda seu estado para `removed`, preservando o bundle, as playlists e o progresso. A mídia deixa de ser servida pelo GridTube e pode ser restaurada em **Removidos**. Para exclusão física, o app valida o caminho específico do bundle, move a pasta para `archive/work/deleting`, limpa os caches de reprodução associados e remove o registro do banco após apagar a pasta. Se houver falha após a movimentação, a exclusão pode ser repetida em **Removidos**.
 - Para restaurar o conjunto, recupere `data/`, `archive/library/`, o Compose e a imagem da mesma arquitetura. Aponte o Jellyfin para `archive/library` em modo somente leitura. O índice do Jellyfin é independente.
 
 ## API e verificação
+
+Os testes offline de recuperação usam acervos descartáveis. Rode `docker run --rm -i --network none gridtube:0.7.3 python - < tests/test_recovery.py` em um shell POSIX. No PowerShell, use `Get-Content -Raw -Encoding utf8 tests/test_recovery.py | docker run --rm -i --network none gridtube:0.7.3 python -`.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 
