@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS video (
     state TEXT NOT NULL, prefs TEXT NOT NULL, capture_overrides TEXT NOT NULL DEFAULT '{}',
     metadata TEXT, folder TEXT,
     pending_folder TEXT, pending_channel TEXT, percent INTEGER DEFAULT 0, error TEXT,
+    progress_phase TEXT, progress_estimated INTEGER NOT NULL DEFAULT 0,
     position REAL DEFAULT 0, watched_at INTEGER, created INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS playlist_item (
@@ -188,6 +189,10 @@ class Archive:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(video)")}
             if "capture_overrides" not in columns:
                 db.execute("ALTER TABLE video ADD COLUMN capture_overrides TEXT NOT NULL DEFAULT '{}'")
+            if "progress_phase" not in columns:
+                db.execute("ALTER TABLE video ADD COLUMN progress_phase TEXT")
+            if "progress_estimated" not in columns:
+                db.execute("ALTER TABLE video ADD COLUMN progress_estimated INTEGER NOT NULL DEFAULT 0")
             track_columns = {row["name"] for row in db.execute("PRAGMA table_info(track_job)")}
             if "retry_at" not in track_columns:
                 db.execute("ALTER TABLE track_job ADD COLUMN retry_at INTEGER NOT NULL DEFAULT 0")
@@ -198,9 +203,10 @@ class Archive:
             pending = db.execute("SELECT * FROM video WHERE pending_folder IS NOT NULL").fetchall()
             for item in pending:
                 self.finish_publish(db, item)
-            db.execute("UPDATE video SET state='queued', percent=0 WHERE state='running'")
+            db.execute("""UPDATE video SET state='queued',percent=0,progress_phase=NULL,progress_estimated=0
+                          WHERE state='running'""")
             db.execute("UPDATE track_job SET state='queued' WHERE state='running'")
-            db.execute("""UPDATE video SET state='queued',percent=0,error=NULL
+            db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,progress_phase=NULL,progress_estimated=0
                           WHERE state='failed' AND (lower(error) LIKE '%unable to download video subtitles%'
                             OR error LIKE '%Postprocessing: Conversion failed!%')""")
 
@@ -568,7 +574,7 @@ class Archive:
                 raise RuntimeError("Published bundle is missing its video")
             db.execute("""UPDATE video SET folder=pending_folder, channel_id=pending_channel,
                           pending_folder=NULL,pending_channel=NULL,state='ready',metadata=?,
-                          title=?,percent=100,error=NULL WHERE id=?""",
+                          title=?,percent=100,error=NULL,progress_phase=NULL,progress_estimated=0 WHERE id=?""",
                        (encode(meta), meta["title"], row["id"]))
             if row["state"] != "ready":
                 self.queue_default_subtitles(db, row)
@@ -578,22 +584,28 @@ class Archive:
 
     def capture(self, item):
         video_id = item["id"]
-        last_progress, last_write = -1, float("-inf")
+        last_progress, last_write = (None, None, False), float("-inf")
 
-        def progress(value):
+        def progress(phase, percent=None, estimated=False):
             nonlocal last_progress, last_write
+            current = (phase, percent, estimated)
+            if current == last_progress:
+                return
             now = time.monotonic()
-            if value > last_progress and (value >= 97 or now - last_write >= 1):
+            if phase != last_progress[0] or percent == 100 or last_progress[1] is None or now - last_write >= 1:
                 with self.db() as db:
-                    db.execute("UPDATE video SET percent=? WHERE id=?", (value, video_id))
-                last_progress, last_write = value, now
+                    db.execute("UPDATE video SET progress_phase=?,percent=?,progress_estimated=? WHERE id=?",
+                               (*current, video_id))
+                last_progress, last_write = current, now
 
         inputs = self.work / "inputs" / video_id
         inputs.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=f"{video_id}-", dir=self.work) as scratch:
             bundle = Path(scratch) / "bundle"
             bundle.mkdir()
+            progress("prepare")
             meta = collector.download(item["url"], json.loads(item["prefs"]), inputs, bundle, progress)
+            progress("publish")
             collector.write_manifest(bundle, meta)
             with self.files_lock:
                 with self.db() as db:
@@ -638,7 +650,8 @@ class Archive:
                         system_event(db, "tracks", error, f"{track['video_id']} · {track['code']}", "error")
                 continue
             with self.db() as db:
-                item = db.execute("""UPDATE video SET state='running' WHERE id=(
+                item = db.execute("""UPDATE video SET state='running',progress_phase='prepare',percent=NULL,
+                    progress_estimated=0 WHERE id=(
                     SELECT id FROM video WHERE state='queued' ORDER BY created,rowid LIMIT 1
                 ) RETURNING *""").fetchone()
             if item is None:
@@ -776,7 +789,7 @@ def library_video(row, db, profiles=None, summary=False):
         meta["capture_overrides"] = json.loads(row["capture_overrides"])
     return {**meta, **{key: row[key] for key in
                       ("id", "title", "url", "channel_id", "kind", "state", "position",
-                       "percent", "error", "watched_at", "created")}}
+                       "percent", "progress_phase", "progress_estimated", "error", "watched_at", "created")}}
 
 
 def create_app(data=None, root=None, workers=True):
@@ -1085,7 +1098,8 @@ def create_app(data=None, root=None, workers=True):
             queued = archive.enqueue(db, {"id": video_id, "url": url, "title": url, "kind": kind},
                                      channel, prefs, overrides)
             if not queued:
-                queued = db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,url=?,kind=?,
+                queued = db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,
+                    progress_phase=NULL,progress_estimated=0,url=?,kind=?,
                     channel_id=?,prefs=?,capture_overrides=? WHERE id=? AND state='failed'""",
                                     (url, kind, channel["id"] if channel else None, encode(prefs),
                                      encode(overrides), video_id)).rowcount
@@ -1211,7 +1225,8 @@ def create_app(data=None, root=None, workers=True):
             overrides = (capture_preferences(data["overrides"]) if "overrides" in data
                          else json.loads(row["capture_overrides"]))
             prefs = {**archive.effective(db, archive.channel(db, row["channel_id"])), **overrides}
-            db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,prefs=?,
+            db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,
+                progress_phase=NULL,progress_estimated=0,prefs=?,
                 capture_overrides=? WHERE id=?""", (encode(prefs), encode(overrides), video_id))
         archive.changed.set()
         return jsonify(ok=True)

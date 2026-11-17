@@ -63,6 +63,9 @@ main{max-width:1610px;margin:auto;padding:30px clamp(18px,3.3vw,48px) 55px}
 .jobs{display:grid;gap:10px}
 .job{display:flex;align-items:center;gap:15px;background:var(--panel);padding:13px;border:1px solid var(--edge);border-radius:9px;overflow-wrap:anywhere}
 .job > div{flex:1;min-width:0;display:grid;gap:5px}
+.job-progress{display:grid;gap:5px}
+.job-progress>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.job-progress span{font-variant-numeric:tabular-nums;font-size:13px}
 progress{width:100%;height:7px;accent-color:var(--accent)}
 dialog{background:var(--panel);color:var(--text);border:1px solid #494949;border-radius:18px;width:min(690px,calc(100% - 22px));max-height:90dvh;padding:0;box-shadow:0 20px 95px #000a}
 dialog::backdrop{background:#060606d9}

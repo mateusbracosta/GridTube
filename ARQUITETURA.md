@@ -57,7 +57,9 @@ Cada idioma guarda uma faixa de áudio e uma legenda. Legendas enviadas pelo can
 
 ## API e verificação
 
-A biblioteca usa `GET /api/videos?summary=1` para carregar somente os dados dos cartões. `GET /api/videos` e a rota individual de faixas preservam os metadados completos. O catálogo dispensa comparações de texto ao listar sem filtro. Na interface, consultas de fundo são pausadas com a aba oculta e espaçadas quando a biblioteca ou o player estão sem atividade. A captura limita gravações intermediárias de progresso a uma por segundo e gera a miniatura com um único thread do FFmpeg.
+A biblioteca usa `GET /api/videos?summary=1` para carregar somente os dados dos cartões. `GET /api/videos` e a rota individual de faixas preservam os metadados completos. O catálogo dispensa comparações de texto ao listar sem filtro. Na interface, consultas de fundo são pausadas com a aba oculta e espaçadas quando a biblioteca ou o player estão sem atividade. A captura gera a miniatura com um único thread do FFmpeg.
+
+Na fila, `progress_phase`, `percent` e `progress_estimated` descrevem a fase, sua porcentagem ou `null`, e se a medida é estimada. Transferências usam bytes do yt-dlp ou contagem de fragmentos. Na montagem, o `out_time_us` do FFmpeg é comparado à duração local das faixas ou à duração estimada da origem. Mudanças de fase e conclusões são persistidas imediatamente, com até uma gravação por segundo para valores intermediários.
 
 O painel **Sistema** consulta `GET /api/system`, que mostra as versões de `yt-dlp` em uso, na imagem e pronta para ativar. `POST /api/system/yt-dlp` consulta a versão estável no PyPI e instala apenas os wheels da versão selecionada e dependências em uma pasta temporária sob `data/dependencies/yt-dlp`. Após um teste de importação, promove a pasta e grava um ponteiro para a próxima inicialização. A imagem continua com a versão fixada no `requirements.txt`. Se a versão preparada não carregar, o app registra o erro e usa a versão da imagem. No Compose, `POST /api/system/yt-dlp/restart` reinicia o processo via política do Docker. O registro persistente tem até 100 eventos e exibe os 50 mais recentes.
 

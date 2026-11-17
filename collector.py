@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unicodedata
 from email.utils import parsedate_to_datetime
@@ -467,12 +468,51 @@ def format_choice(formats, quality, language, mode, duration=None):
                                              not pair[0]["vcodec"].startswith(WEBM_VIDEO)))
 
 
-def ffmpeg(*args):
+def ffmpeg(*args, progress=None):
     executable = shutil.which("ffmpeg")
     if not executable:
         raise RuntimeError("FFmpeg is required")
-    subprocess.run([executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", *map(str, args)],
-                   check=True, capture_output=True, timeout=10800)
+    command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
+    arguments = list(map(str, args))
+    if progress is None:
+        subprocess.run(command + arguments, check=True, capture_output=True, timeout=10800)
+        return
+
+    failures = []
+    command += ["-progress", "pipe:1", "-stats_period", "0.5"] + arguments
+    with tempfile.TemporaryFile() as errors, subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors) as process:
+        def read_progress():
+            for line in process.stdout:
+                key, _, value = line.strip().partition(b"=")
+                if key == b"out_time_us" and value.lstrip(b"-").isdigit() and not failures:
+                    try:
+                        progress(int(value))
+                    except Exception as exc:
+                        failures.append(exc)
+
+        observer = threading.Thread(target=read_progress, name="ffmpeg-progress")
+        observer.start()
+        try:
+            process.wait(timeout=10800)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            observer.join()
+        if process.returncode:
+            errors.seek(0)
+            raise subprocess.CalledProcessError(process.returncode, command, stderr=errors.read())
+        if failures:
+            raise failures[0]
+
+
+def media_duration(path):
+    try:
+        value = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                                "-of", "default=nw=1:nk=1", str(path)], timeout=12))
+        return value if 0 < value < float("inf") else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 def download_input(info, format_id, work, kind, update=None):
@@ -484,7 +524,7 @@ def download_input(info, format_id, work, kind, update=None):
     return media_output(result, work, stem)
 
 
-def mux_video(source, target, language, audio_source=None, audio_codec="copy"):
+def mux_video(source, target, language, audio_source=None, audio_codec="copy", progress=None):
     common = ["-fflags", "+genpts", "-i", source]
     if audio_source:
         common += ["-fflags", "+genpts", "-i", audio_source]
@@ -496,9 +536,21 @@ def mux_video(source, target, language, audio_source=None, audio_codec="copy"):
         iso_code = {"pt": "por", "en": "eng"}[language]
         common += ["-metadata:s:a:0", f"language={iso_code}"]
     try:
-        ffmpeg(*common, "-c:v", "copy", "-c:a", audio_codec, target)
+        ffmpeg(*common, "-c:v", "copy", "-c:a", audio_codec, target, progress=progress)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(f"FFmpeg: {exc.stderr.decode(errors='replace')[-650:]}") from exc
+
+
+def transfer_progress(event):
+    if event.get("status") != "downloading":
+        return None
+    total = event.get("total_bytes") or event.get("total_bytes_estimate")
+    if total and total > 0 and event.get("downloaded_bytes") is not None:
+        percent = max(0, min(99, int(100 * event["downloaded_bytes"] / total)))
+        return percent, bool(event.get("fragment_count") or not event.get("total_bytes"))
+    if event.get("fragment_count") and event.get("fragment_index") is not None:
+        return max(0, min(99, int(100 * event["fragment_index"] / event["fragment_count"]))), True
+    return None
 
 
 def download(url, prefs, work, bundle, progress):
@@ -512,16 +564,27 @@ def download(url, prefs, work, bundle, progress):
     separate = picture is not audio
     video_codec, audio_codec = picture["vcodec"], audio["acodec"]
 
-    def report(offset, weight):
+    def transfer(fmt, stem, phase):
         def update(event):
-            total = event.get("total_bytes") or event.get("total_bytes_estimate")
-            if event.get("status") == "downloading" and total:
-                progress(offset + min(weight, int(weight * event.get("downloaded_bytes", 0) / total)))
-        return update
+            if values := transfer_progress(event):
+                progress(phase, *values)
 
-    source = download_input(info, picture["format_id"], work, "picture", report(0, 78 if separate else 95))
-    audio_source = download_input(info, audio["format_id"], work, "sound", report(78, 17)) if separate else None
-    progress(97)
+        progress(phase)
+        path = download_input(info, fmt["format_id"], work, stem, update)
+        progress(phase, 100)
+        return path
+
+    source = transfer(picture, "picture", "video")
+    audio_source = transfer(audio, "sound", "audio") if separate else None
+    progress("mux")
+    duration = media_duration(source)
+    sound_duration = media_duration(audio_source) if audio_source else duration
+    estimated = not duration or not sound_duration
+    expected = max(duration or 0, sound_duration or 0, (info.get("duration") or 0) if estimated else 0)
+
+    def remuxed(microseconds):
+        progress("mux", max(0, min(99, int(100 * microseconds / (expected * 1_000_000)))), estimated)
+
     title = info.get("title") or info["id"]
     stem = safe_name(title)
     extension = "webm" if video_codec.startswith(WEBM_VIDEO) and audio_codec.startswith(WEBM_AUDIO) else "mp4"
@@ -529,7 +592,9 @@ def download(url, prefs, work, bundle, progress):
     reported = audio.get("language")
     label = audio_label(audio_source or source, reported, prefs["audio"] != "original" and
                         bool(language_score(reported, prefs["audio"])))
-    mux_video(source, target, label["audio"], audio_source)
+    mux_video(source, target, label["audio"], audio_source, progress=remuxed if expected else None)
+    progress("mux", 100)
+    progress("thumbnail")
     try:
         ffmpeg("-filter_threads", "1", "-threads", "1", "-ss", min(5, (info.get("duration") or 0) / 3),
                "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", bundle / f"{stem}-thumb.jpg")

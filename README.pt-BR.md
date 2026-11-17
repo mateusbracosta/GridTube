@@ -37,6 +37,8 @@ O Compose recria o container quando a imagem muda. A biblioteca, o banco e as co
 - **Baixar por link** pode guardar em um canal ou em **Avulsos**. Em **Opções para este vídeo**, escolha modo de download, limite de resolução no modo compacto, áudio e legendas. Os campos deixados em **Usar padrão** herdam as preferências do canal ou os padrões globais. Em **Downloads**, use **Editar opções e tentar novamente** para ajustar uma tentativa que falhou. **Tentar novamente** reutiliza as escolhas individuais já feitas. Abra o menu de organização de um vídeo para mover a pasta para outro canal, criar um canal local e já mover o vídeo, ou criar/adicionar a uma playlist. Uma playlist aponta para o vídeo da biblioteca, com uma única cópia física.
 - **PT-BR / EN** alterna o idioma da interface naquele navegador. O player local oferece legendas, capítulos quando disponíveis e retomada de posição.
 
+Em **Downloads**, a porcentagem acompanha a fase atual. A transferência de vídeo e áudio usa os bytes baixados, e a montagem usa a posição processada que o FFmpeg informa. A interface marca estimativas e usa uma barra indeterminada quando a etapa não tem uma medida de progresso.
+
 Em **Organizar vídeo → Excluir vídeo**, escolha **Remover da biblioteca** para manter os arquivos e restaurar o vídeo depois em **Removidos**. **Excluir também do disco** apaga a pasta daquele vídeo e seus arquivos auxiliares. Para excluir no disco, o Docker precisa de acesso de escrita à montagem do acervo.
 
 ### Modo de download
@@ -89,8 +91,8 @@ Para levar só a mídia, copie `archive/library` ou as pastas desejadas. Para us
 Com o serviço parado, copie `data/` e `archive/library/` para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.tar gridtube:0.7
-docker load -i gridtube-0.7.tar
+docker save -o gridtube-0.7.1.tar gridtube:0.7.1
+docker load -i gridtube-0.7.1.tar
 docker compose up -d --no-build --pull never
 ~~~
 

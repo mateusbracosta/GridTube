@@ -3,6 +3,13 @@ const translations = {
   resume: ["Continuar assistindo","Continue watching"],
   inbox: ["Avulsos","Unfiled"],
   downloads: ["Downloads","Downloads"],
+  progressPrepare: ["Preparando download","Preparing download"],
+  progressVideo: ["Baixando vídeo","Downloading video"],
+  progressAudio: ["Baixando áudio","Downloading audio"],
+  progressMux: ["Montando o arquivo","Muxing the file"],
+  progressThumbnail: ["Gerando miniatura","Generating thumbnail"],
+  progressPublish: ["Salvando na biblioteca","Saving to library"],
+  progressEstimate: ["estimado","estimated"],
   channels: ["Canais","Channels"],
   playlists: ["Playlists","Playlists"],
   settings: ["Configurações","Settings"],
@@ -398,8 +405,9 @@ async function refresh() {
 }
 async function backgroundRefresh(force=false) {
   if (document.hidden || modal.open || watchPath() || backgroundRefreshPending) return;
-  const busy = scope==="downloads" || state.counts.queued || state.counts.running;
-  if (!force && performance.now()-lastRefresh<(busy?3500:15000)) return;
+  const busy = state.counts.queued || state.counts.running;
+  const delay = busy && scope==="downloads" ? 1900 : busy || scope==="downloads" ? 3500 : 15000;
+  if (!force && performance.now()-lastRefresh<delay) return;
   backgroundRefreshPending = true;
   try { await refresh(); }
   catch { /* The next foreground poll can retry. */ }
@@ -452,8 +460,17 @@ function card(v) {
 }
 function job(v) {
   return `<article class="job"><div><strong>${esc(v.title)}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
-    ${v.state==="running"?`<progress max="100" value="${Number(v.percent)}"></progress>`:""}
+    ${v.state==="running"?jobProgress(v):""}
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div>${v.state==="failed"?`<aside class="job-actions">${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}</aside>`:""}</article>`;
+}
+function jobProgress(v) {
+  const phases={prepare:"progressPrepare",video:"progressVideo",audio:"progressAudio",mux:"progressMux",
+    thumbnail:"progressThumbnail",publish:"progressPublish"};
+  const phase=t(phases[v.progress_phase]||"progressPrepare");
+  const known=Number.isFinite(v.percent);
+  const label=known?`${v.percent}%${v.progress_estimated?` (${t("progressEstimate")})`:""}`:"";
+  return `<div class="job-progress"><div><small>${phase}</small>${known?`<span>${label}</span>`:""}</div>
+    <progress max="100" ${known?`value="${v.percent}"`:""} aria-label="${phase}${label?` · ${label}`:""}"></progress></div>`;
 }
 function removedRow(v) {
   return `<article class="job"><div><strong>${esc(v.title)}</strong></div><aside class="job-actions">
@@ -1230,4 +1247,4 @@ shell();
 refresh().catch(error=>flash(t(error.message)));
 setInterval(()=>{if(!document.hidden&&(catalog?.pending||catalog?.autoPoll)&&modal.open) pollCatalog(catalog);},1600);
 setInterval(pollSystem,1800);
-setInterval(backgroundRefresh,4000);
+setInterval(backgroundRefresh,2000);
