@@ -43,7 +43,8 @@ class RecoveryTests(unittest.TestCase):
         with self.archive.db() as db:
             item = dict(db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
 
-        def download(url, prefs, work, bundle, progress):
+        def download(url, prefs, work, bundle, progress, *, on_title):
+            on_title("Fixture")
             (bundle / "Fixture.mp4").write_bytes(b"retry")
             return {"title": "Fixture", "filename": "Fixture.mp4"}
 
@@ -67,6 +68,31 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaises(StopTest):
                 self.archive.worker()
         self.assertEqual(self.client.get("/api/state").json["counts"], {"queued": 1})
+
+    def test_queued_title_lookup_backfills_old_urls_without_starting_downloads(self):
+        legacy, unavailable = "fixture0001", "fixture0002"
+        self.queue_video(legacy)
+        self.queue_video(unavailable)
+        with self.archive.db() as db:
+            db.execute("UPDATE video SET title=url WHERE id=?", (legacy,))
+            db.execute("UPDATE video SET state='failed' WHERE id=?", (unavailable,))
+        with patch.object(collector, "read_video_title", side_effect=lambda vid: "Título de teste" if vid == legacy else None):
+            self.archive.backfill_download_titles()
+            self.archive.titles.shutdown(wait=True)
+        jobs = {job["id"]: job for job in self.client.get("/api/videos?state=jobs").json["videos"]}
+        self.assertEqual((jobs[legacy]["title"], jobs[legacy]["state"]), ("Título de teste", "queued"))
+        self.assertEqual((jobs[unavailable]["title"], jobs[unavailable]["state"]), (unavailable, "failed"))
+
+    def test_capture_saves_title_before_selecting_formats(self):
+        video_id = "fixture0001"
+        self.queue_video(video_id)
+        with self.archive.db() as db:
+            item = dict(db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
+        with patch.object(collector, "read_video", return_value={"id": video_id, "title": "Título da captura"}), \
+             patch.object(collector, "format_choice", side_effect=ValueError("formats unavailable")):
+            with self.assertRaisesRegex(ValueError, "formats unavailable"):
+                self.archive.capture(item)
+        self.assertEqual(self.client.get("/api/videos?state=jobs").json["videos"][0]["title"], "Título da captura")
 
     def test_playlist_projection_failure_isolated(self):
         with self.archive.db() as db:

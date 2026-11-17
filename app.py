@@ -184,6 +184,7 @@ class Archive:
         self.catalog = ThreadPoolExecutor(max_workers=1, thread_name_prefix="catalog")
         self.playlist_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="playlist-scan")
         self.origins = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-origin")
+        self.titles = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-title")
         self.origin_lock = threading.Lock()
         self.origin_attempts = {}
         self.files_lock = threading.Lock()
@@ -502,7 +503,8 @@ class Archive:
 
     def enqueue(self, db, entry, channel, prefs, capture_overrides=None):
         rule = prefs.get("title_filter")
-        if rule and entry["title"] != entry["url"] and collector.title_key(rule) not in collector.title_key(entry["title"]):
+        if (rule and entry["title"] not in {entry["url"], entry["id"]}
+                and collector.title_key(rule) not in collector.title_key(entry["title"])):
             return 0
         cursor = db.execute(
             """INSERT INTO video (id,url,title,channel_id,kind,prefs,capture_overrides,state,created)
@@ -510,6 +512,25 @@ class Archive:
             (entry["id"], entry["url"], entry["title"], channel["id"] if channel else None,
              entry["kind"], encode(prefs), encode(capture_overrides or {}), timestamp()))
         return cursor.rowcount
+
+    def backfill_download_titles(self):
+        with self.db() as db:
+            pending = db.execute("""SELECT id FROM video WHERE state IN ('queued','running','failed')
+                AND title IN (url,id) ORDER BY created,rowid""").fetchall()
+        for row in pending:
+            self.titles.submit(self.lookup_download_title, row["id"])
+
+    def lookup_download_title(self, video_id):
+        with self.db() as db:
+            unresolved = db.execute("""SELECT 1 FROM video WHERE id=? AND state IN ('queued','running','failed')
+                AND title IN (url,id)""", (video_id,)).fetchone()
+        if unresolved and (title := collector.read_video_title(video_id)):
+            self.remember_download_title(video_id, title)
+
+    def remember_download_title(self, video_id, title):
+        with self.db() as db:
+            db.execute("""UPDATE video SET title=? WHERE id=? AND state IN ('queued','running','failed')
+                AND title IN (url,id)""", (title, video_id))
 
     def scan_source(self, source):
         try:
@@ -861,7 +882,8 @@ class Archive:
             bundle = Path(scratch) / "bundle"
             bundle.mkdir()
             progress("prepare")
-            meta = collector.download(item["url"], json.loads(item["prefs"]), inputs, bundle, progress)
+            meta = collector.download(item["url"], json.loads(item["prefs"]), inputs, bundle, progress,
+                                      on_title=lambda title: self.remember_download_title(video_id, title))
             progress("publish")
             collector.write_manifest(bundle, meta)
             with self.files_lock:
@@ -1185,6 +1207,7 @@ def create_app(data=None, root=None, workers=True):
         threading.Thread(target=archive.sync_loop, daemon=True, name="subscription").start()
         archive.backfill_profiles()
         archive.backfill_video_origins()
+        archive.backfill_download_titles()
 
     def body():
         value = request.get_json()
@@ -1543,17 +1566,19 @@ def create_app(data=None, root=None, workers=True):
         with archive.db() as db:
             channel = archive.channel(db, data.get("channel") or None)
             prefs = {**archive.effective(db, channel), **overrides}
-            queued = archive.enqueue(db, {"id": video_id, "url": url, "title": url, "kind": kind},
+            queued = archive.enqueue(db, {"id": video_id, "url": url, "title": video_id, "kind": kind},
                                      channel, prefs, overrides)
             if not queued:
                 queued = db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,
-                    progress_phase=NULL,progress_estimated=0,url=?,kind=?,
+                    progress_phase=NULL,progress_estimated=0,title=CASE WHEN title=url THEN id ELSE title END,url=?,kind=?,
                     channel_id=?,prefs=?,capture_overrides=? WHERE id=? AND state='failed'""",
                                     (url, kind, channel["id"] if channel else None, encode(prefs),
                                      encode(overrides), video_id)).rowcount
                 if not queued and db.execute("SELECT 1 FROM video WHERE id=? AND state='removed'", (video_id,)).fetchone():
                     return jsonify(error="restore_removed_first"), 409
         archive.changed.set()
+        if workers and queued:
+            archive.titles.submit(archive.lookup_download_title, video_id)
         return jsonify(id=video_id, queued=queued)
 
     @app.get("/api/videos")
@@ -1684,6 +1709,8 @@ def create_app(data=None, root=None, workers=True):
                 progress_phase=NULL,progress_estimated=0,prefs=?,
                 capture_overrides=? WHERE id=?""", (encode(prefs), encode(overrides), video_id))
         archive.changed.set()
+        if workers and row["title"] in {row["url"], row["id"]}:
+            archive.titles.submit(archive.lookup_download_title, video_id)
         return jsonify(ok=True)
 
     @app.post("/api/videos/<video_id>/progress")

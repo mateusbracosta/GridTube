@@ -11,7 +11,8 @@ import time
 import unicodedata
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.request import urlopen
 
 import dependencies
 
@@ -217,6 +218,19 @@ def read_video(url, subtitles=False, automatic=False, catalog_title=False):
     with YoutubeDL(options(noplaylist=True, format="best/bestaudio/bestvideo", writesubtitles=subtitles,
                            writeautomaticsub=automatic, **metadata_options)) as downloader:
         return extract_video(downloader, url)
+
+
+def read_video_title(video_id):
+    if not VIDEO_ID.fullmatch(video_id):
+        return None
+    query = urlencode({"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"})
+    try:
+        with urlopen(f"https://www.youtube.com/oembed?{query}", timeout=5) as response:
+            metadata = json.loads(response.read(64 * 1024))
+    except (OSError, ValueError):
+        return None
+    title = metadata.get("title") if isinstance(metadata, dict) else None
+    return title.strip() if isinstance(title, str) and title.strip() else None
 
 
 def extract_video(downloader, url):
@@ -553,9 +567,12 @@ def transfer_progress(event):
     return None
 
 
-def download(url, prefs, work, bundle, progress):
+def download(url, prefs, work, bundle, progress, *, on_title):
     title_filter = prefs.get("title_filter", "")
     info = read_video(url, catalog_title=bool(title_filter))
+    title = info.get("title") or info["id"]
+    if title != info["id"]:
+        on_title(title)
     if title_filter and title_key(title_filter) not in title_key(info.get("title")):
         raise ValueError("title_filter_mismatch")
     formats = info.get("formats") or []
@@ -585,7 +602,6 @@ def download(url, prefs, work, bundle, progress):
     def remuxed(microseconds):
         progress("mux", max(0, min(99, int(100 * microseconds / (expected * 1_000_000)))), estimated)
 
-    title = info.get("title") or info["id"]
     stem = safe_name(title)
     extension = "webm" if video_codec.startswith(WEBM_VIDEO) and audio_codec.startswith(WEBM_AUDIO) else "mp4"
     target = bundle / f"{stem}.{extension}"

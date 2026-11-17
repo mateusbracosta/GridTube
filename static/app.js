@@ -150,6 +150,7 @@ const translations = {
   play: ["Reproduzir","Play"],
   retry: ["Tentar novamente","Retry"],
   queuedState: ["Na fila","Queued"],
+  youtubeVideo: ["Vídeo do YouTube","YouTube video"],
   running: ["Baixando / processando","Downloading / processing"],
   failed: ["Falhou","Failed"],
   audioFallback: ["Áudio preferido indisponível. Foi guardada a faixa disponível.","Preferred audio unavailable. The available track was saved."],
@@ -498,8 +499,11 @@ function card(v) {
     <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small></div>
     ${btn("organize",t("organize"),"more","flat icon-only",v.id)}</div></article>`;
 }
+function jobTitle(v) {
+  return v.title && v.title !== v.url && v.title !== v.id ? v.title : `${t("youtubeVideo")} · ${v.id}`;
+}
 function job(v) {
-  return `<article class="job"><div><strong>${esc(v.title)}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
+  return `<article class="job"><div><strong>${esc(jobTitle(v))}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
     ${v.state==="running"?jobProgress(v):""}
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div>${v.state==="failed"?`<aside class="job-actions">${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}</aside>`:""}</article>`;
 }
@@ -736,7 +740,7 @@ function downloadByLink() {
 }
 function editRetry(item) {
   if (!item || item.state!=="failed") return;
-  simple("editRetry",`<strong class="wrap">${esc(item.title)}</strong>
+  simple("editRetry",`<strong class="wrap">${esc(jobTitle(item))}</strong>
     <fieldset class="capture-options"><legend>${t("videoOptions")}</legend>
       <p class="note">${t("videoOptionsNote")}</p>${videoCaptureFields(item.channel_id,item.capture_overrides)}
     </fieldset>`,"retry",async data=>{
