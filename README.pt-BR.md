@@ -63,6 +63,8 @@ Em **Organizar vídeo → Excluir vídeo**, escolha **Remover da biblioteca** pa
 
 Cada vídeo abre em uma página com endereço próprio, player, canal, data, descrição e sugestões do acervo. **Voltar** recupera a seção anterior quando você veio pela interface. O **Modo cinema** amplia o player e compacta a barra lateral em ícones no desktop. O logo abre a Biblioteca. A escolha fica neste navegador.
 
+Use **Abrir no YouTube** na página do vídeo ou no menu de três pontos do cartão para consultar a publicação na origem.
+
 Com foco fora dos campos e botões, **K** ou **Espaço** pausa e retoma. **←/→** voltam ou avançam 5 segundos, e **J/L**, 10 segundos. **M** alterna som, **F** alterna tela cheia, **C** alterna legenda e **T** alterna modo cinema.
 
 ## Áudio, dublagem e legendas
@@ -70,6 +72,8 @@ Com foco fora dos campos e botões, **K** ou **Espaço** pausa e retoma. **←/�
 Na engrenagem **Áudio e legendas**, dentro do vídeo, use **Buscar mais idiomas** para ver as faixas disponíveis na origem e baixar áudios ou legendas adicionais. Depois de salvas, **Faixa de áudio** e **Legenda em exibição** alternam entre as opções locais. Se uma legenda falhar, o vídeo permanece disponível e a faixa pode ser tentada novamente. A dublagem depende das faixas que o YouTube oferece.
 
 A lixeira ao lado de uma faixa adicional selecionada apaga seu arquivo do HD. Ao lado de uma tentativa com erro, a lixeira limpa a tentativa. O áudio que faz parte do arquivo de vídeo continua disponível.
+
+O player centraliza as legendas na parte inferior. Os arquivos de legenda exportados preservam o posicionamento de origem.
 
 Canais conectados ao YouTube têm foto, capa e descrição armazenadas localmente. Em vídeos avulsos, o player usa o nome e a foto do canal obtidos pelo identificador oficial da origem. Para ligar um canal criado no app a uma origem, informe o link em **Editar canal**.
 
@@ -118,8 +122,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.6.tar gridtube:0.7.6
-docker load -i gridtube-0.7.6.tar
+docker save -o gridtube-0.7.7.tar gridtube:0.7.7
+docker load -i gridtube-0.7.7.tar
 docker compose up -d --no-build --pull never
 ~~~
 

@@ -48,6 +48,8 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 
 In the player settings, use the trash button next to a selected extra track to delete its file from disk. The trash button next to a failed attempt clears the attempt. Video cards use the saved YouTube thumbnail when available and keep the watch position for the progress bar and playback resume.
 
+The player centers subtitles at the bottom. **Open on YouTube** is available on the watch page and in the video card's three-dot menu.
+
 From **Organize video → Remove video**, choose **Remove from library** to keep the files and restore the entry later from **Removed**, or **Also delete from disk** to erase the saved bundle. Disk deletion requires a writable archive mount.
 
 GridTube puts videos in the archive's `library/` folder, one directory per video, with the MP4 or WebM, a local JSON manifest, and any available sidecars. The `data/` directory holds the database and profile images. Copy `library/` to export just the media. To browse the files in Jellyfin, mount that directory read-only and use a Home Videos and Photos library. Direct playback depends on the Jellyfin client and codecs.

@@ -136,6 +136,7 @@ const translations = {
   channel: ["Canal","Channel"],
   playlist: ["Playlist","Playlist"],
   organize: ["Organizar vídeo","Organize video"],
+  openOnYouTube: ["Abrir no YouTube","Open on YouTube"],
   move: ["Mover para canal","Move to channel"],
   unfiled: ["Mover para Avulsos","Move to Unfiled"],
   addTo: ["Adicionar à playlist","Add to playlist"],
@@ -262,6 +263,8 @@ const t = key => translations[key]?.[Number(locale === "en")] || key;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 const asset = (id,name) => `/media/${encodeURIComponent(id)}/${encodeURIComponent(name)}`;
+const youtubeLink = video => `<a class="youtube-source" target="_blank" rel="noopener noreferrer"
+  href="https://www.youtube.com/watch?v=${encodeURIComponent(video.id)}">${icon("link")} ${t("openOnYouTube")}</a>`;
 const channelOf = id => state.channels.find(c => c.id === id);
 const duration = seconds => seconds > 0
   ? [Math.floor(seconds/3600), Math.floor(seconds/60)%60, Math.floor(seconds)%60].slice(seconds<3600?1:0).map((n,i)=>i?String(n).padStart(2,"0"):n).join(":") : "";
@@ -971,6 +974,7 @@ function watch(item, initialJobs=[], autoplay=false) {
             <div class="watch-date note" id="watch-date"></div>
             <div id="watch-description" hidden><p id="description-text"></p>
               <button id="expand-description" class="flat description-toggle" type="button" aria-expanded="false">${t("showDescription")}</button></div>
+            ${youtubeLink(item)}
           </div>
           ${chapters?`<details><summary>${t("chapters")}</summary><div class="watch-chapters">${chapters}</div></details>`:""}
         </div>
@@ -1000,9 +1004,28 @@ function watch(item, initialJobs=[], autoplay=false) {
     fetch(`/api/videos/${item.id}/progress`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({position}),keepalive}).catch(()=>{});
   };
+  const positionedTracks = new WeakSet();
+  const positionSubtitles = node => {
+    const track = node.track;
+    const cues = track.cues;
+    if (!cues?.length || positionedTracks.has(node)) return;
+    // A cue can retain the file's position anchor even when the browser omits its DOM setter.
+    const originals = Array.from(cues);
+    positionedTracks.add(node);
+    for (const cue of originals) {
+      const centered = new VTTCue(cue.startTime, cue.endTime, cue.text);
+      centered.id = cue.id;
+      centered.pauseOnExit = cue.pauseOnExit;
+      centered.size = 90;
+      track.removeCue(cue);
+      track.addCue(centered);
+    }
+  };
   const setSubtitle = () => {
     for (const node of player.querySelectorAll("track")) {
-      node.track.mode = node.srclang===subtitle ? "showing" : "disabled";
+      const selected = node.srclang === subtitle;
+      node.track.mode = selected ? "showing" : "disabled";
+      if (selected) positionSubtitles(node);
     }
   };
   const changeAudio = (next, position=initialized?player.currentTime:requestedTime,
@@ -1113,6 +1136,8 @@ function watch(item, initialJobs=[], autoplay=false) {
         track.src = asset(video.id,filename);
         track.srclang = tag;
         track.label = languageName(tag);
+        track.addEventListener("load", () => positionSubtitles(track));
+        track.track.addEventListener("cuechange", () => positionSubtitles(track));
         player.append(track);
       }
       setSubtitle();
@@ -1286,6 +1311,7 @@ function watch(item, initialJobs=[], autoplay=false) {
 function organize(item) {
   if (!item) return;
   dialog(t("organize"),`<div class="dialog-body"><strong>${esc(item.title)}</strong>
+    ${youtubeLink(item)}
     <form id="move">${select("channel",t("move"),channels(t("unfiled")),item.channel_id||"")}
     <button>${t("move")}</button></form>
     <form id="new-channel">${field("newChannelName","","required maxlength=100")}<button>${t("createMove")}</button></form>

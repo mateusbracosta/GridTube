@@ -165,6 +165,9 @@ textarea{font:inherit;color:var(--text);background:#151515;border:1px solid var(
 .watch-pill[aria-pressed=true]{background:#3e161b;border-color:#ad3543}
 .watch-info{background:var(--panel);padding:14px 16px;border:1px solid var(--edge);border-radius:12px}
 .watch-date{font-weight:700;color:#d4d4d4;margin-bottom:1px}
+.youtube-source{display:inline-flex;align-items:center;gap:6px;width:fit-content;font-size:13px}
+.youtube-source svg{width:15px;height:15px}
+.watch-info .youtube-source{margin-top:10px}
 #description-text{margin-top:8px;line-height:1.6;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;color:#e2e2e2}
 #watch-description.expanded #description-text{display:block}
 .description-toggle{padding:4px 0;margin-top:6px;font-weight:700}
