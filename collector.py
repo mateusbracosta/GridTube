@@ -531,8 +531,8 @@ def download(url, prefs, work, bundle, progress):
                         bool(language_score(reported, prefs["audio"])))
     mux_video(source, target, label["audio"], audio_source)
     try:
-        ffmpeg("-ss", min(5, (info.get("duration") or 0) / 3), "-i", target,
-               "-frames:v", "1", "-vf", "scale=720:-2", bundle / f"{stem}-thumb.jpg")
+        ffmpeg("-filter_threads", "1", "-threads", "1", "-ss", min(5, (info.get("duration") or 0) / 3),
+               "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", bundle / f"{stem}-thumb.jpg")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
     return {

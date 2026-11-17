@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS track_job (
 );
 CREATE INDEX IF NOT EXISTS track_pending ON track_job(state);
 CREATE INDEX IF NOT EXISTS video_state ON video(state,created);
+CREATE INDEX IF NOT EXISTS video_channel_recent ON video(state,channel_id,created);
+CREATE INDEX IF NOT EXISTS video_resume ON video(state,watched_at) WHERE position>0;
 CREATE INDEX IF NOT EXISTS entry_order ON entry(source,ordinal);
 """
 
@@ -161,6 +163,7 @@ class Archive:
         self.work = self.library.parent / "work"
         self.branding = self.data / "branding"
         self.playback = self.work / "playback"
+        self.playback_budget = max(1, int(os.environ.get("GRIDTUBE_PLAYBACK_CACHE_MIB", "4096"))) * 1024 ** 2
         self.playback_lock = threading.Lock()
         self.dependency_lock = threading.Lock()
         for path in (self.data, self.library, self.work, self.branding, self.playback):
@@ -476,16 +479,20 @@ class Archive:
             base_path = folder / metadata["filename"]
             audio_path = folder / audio
             variant = self.playback / f"{video_id}-{self.playback_cache_name(video_id, code, base_path, audio_path)}"
-            if not variant.exists():
+            try:
+                info = variant.stat()
+            except FileNotFoundError:
                 with tempfile.TemporaryDirectory(prefix="mux-", dir=self.playback) as temp:
                     staged = Path(temp) / variant.name
                     codec = "libopus" if base_path.suffix == ".webm" else "copy"
                     collector.mux_video(base_path, staged, code, audio_path, audio_codec=codec)
                     staged.replace(variant)
-            os.utime(variant, ns=(time.time_ns(), variant.stat().st_mtime_ns))
-            response = send_from_directory(self.playback, variant.name, conditional=True)
-            self.prune_playback(variant)
-            return response
+                self.prune_playback(variant)
+            else:
+                now = time.time_ns()
+                if now - info.st_atime_ns >= 60 * 10**9:
+                    os.utime(variant, ns=(now, info.st_mtime_ns))
+            return send_from_directory(self.playback, variant.name, conditional=True)
 
     @staticmethod
     def playback_cache_name(video_id, code, base_path, audio_path):
@@ -493,17 +500,21 @@ class Archive:
         return hashlib.sha256(signature.encode()).hexdigest() + base_path.suffix
 
     def prune_playback(self, current):
-        budget = 4 * 1024 ** 3
-        cached = sorted((path for path in self.playback.iterdir() if path.suffix in {".mp4", ".webm"}),
-                        key=lambda path: path.stat().st_atime_ns, reverse=True)
-        used = sum(path.stat().st_size for path in cached)
-        for path in reversed(cached):
-            if used <= budget:
+        cached = []
+        for path in self.playback.iterdir():
+            if path.suffix in {".mp4", ".webm"}:
+                try:
+                    info = path.stat()
+                except OSError:
+                    continue
+                cached.append((info.st_atime_ns, info.st_size, path))
+        used = sum(size for _, size, _ in cached)
+        for _, size, path in sorted(cached):
+            if used <= self.playback_budget:
                 break
             if path != current:
                 try:
-                    size = path.stat().st_size
-                    path.unlink()
+                    path.unlink(missing_ok=True)
                     used -= size
                 except OSError:
                     logging.warning("Could not clear playback cache file %s", path.name)
@@ -567,14 +578,15 @@ class Archive:
 
     def capture(self, item):
         video_id = item["id"]
-        last_progress = -1
+        last_progress, last_write = -1, float("-inf")
 
         def progress(value):
-            nonlocal last_progress
-            if value > last_progress:
+            nonlocal last_progress, last_write
+            now = time.monotonic()
+            if value > last_progress and (value >= 97 or now - last_write >= 1):
                 with self.db() as db:
                     db.execute("UPDATE video SET percent=? WHERE id=?", (value, video_id))
-                last_progress = value
+                last_progress, last_write = value, now
 
         inputs = self.work / "inputs" / video_id
         inputs.mkdir(parents=True, exist_ok=True)
@@ -746,13 +758,20 @@ class Archive:
         self.changed.set()
 
 
-def library_video(row, db):
+def library_video(row, db, profiles=None, summary=False):
     meta = json.loads(row["metadata"]) if row["metadata"] else {}
-    if meta.get("source_channel_url"):
-        profile = db.execute("SELECT profile FROM channel_profile WHERE source=?",
-                             (meta["source_channel_url"],)).fetchone()
+    source = meta.get("source_channel_url")
+    if summary:
+        meta = {key: meta[key] for key in ("duration", "thumbnail", "upload_date", "source_channel") if key in meta}
+    if source:
+        if profiles is None:
+            profiles = {}
+        if source not in profiles:
+            result = db.execute("SELECT profile FROM channel_profile WHERE source=?", (source,)).fetchone()
+            profiles[source] = json.loads(result["profile"]) if result else None
+        profile = profiles[source]
         if profile:
-            meta["source_profile"] = json.loads(profile["profile"])
+            meta["source_profile"] = {"name": profile.get("name")} if summary else profile
     if row["state"] != "ready":
         meta["capture_overrides"] = json.loads(row["capture_overrides"])
     return {**meta, **{key: row[key] for key in
@@ -802,6 +821,10 @@ def create_app(data=None, root=None, workers=True):
     @app.get("/favicon.ico")
     def favicon():
         return app.send_static_file("favicon.ico")
+
+    @app.get("/healthz")
+    def health():
+        return "", 204
 
     @app.get("/api/state")
     def state():
@@ -910,8 +933,15 @@ def create_app(data=None, root=None, workers=True):
                         if key else None)
             if key and not playlist:
                 abort(404)
-            clause = "e.source=? AND instr(title_key(e.title),title_key(?))>0 AND instr(title_key(e.title),title_key(?))>0 AND (?='all' OR e.kind=?)"
-            args = [source, query, rule, kind, kind]
+            clause = "e.source=?"
+            args = [source]
+            for term in dict.fromkeys(map(collector.title_key, (query, rule))):
+                if term:
+                    clause += " AND instr(title_key(e.title),?)>0"
+                    args.append(term)
+            if kind != "all":
+                clause += " AND e.kind=?"
+                args.append(kind)
             source_join = "entry e"
             order = "e.ordinal,e.id"
             if playlist:
@@ -1069,15 +1099,19 @@ def create_app(data=None, root=None, workers=True):
         state = request.args.get("state", "ready")
         scope = request.args.get("scope", "")
         term = request.args.get("q", "").strip()
+        summary = request.args.get("summary") == "1"
         states = {"jobs": ("queued", "running", "failed"), "removed": ("removed",)}.get(state, ("ready",))
-        params = [*states, term]
-        where = f"state IN ({','.join('?' for _ in states)}) AND instr(fold(title),fold(?))>0"
+        params = list(states)
+        where = f"state IN ({','.join('?' for _ in states)})"
+        if term:
+            where += " AND instr(fold(title),?)>0"
+            params.append(term.casefold())
         order = "created DESC,rowid DESC"
         if scope == "inbox":
             where += " AND channel_id IS NULL"
         elif scope == "continue":
             where += " AND position>0"
-            order = "watched_at DESC"
+            order = "watched_at DESC,rowid DESC"
         elif scope.startswith("channel:"):
             where += " AND channel_id=?"
             params.append(scope.split(":", 1)[1])
@@ -1086,10 +1120,12 @@ def create_app(data=None, root=None, workers=True):
             params.append(scope.split(":", 1)[1])
         page = max(1, request.args.get("page", 1, type=int))
         with archive.db() as db:
+            db.execute("BEGIN")
             total = db.execute(f"SELECT count(*) FROM video WHERE {where}", params).fetchone()[0]
             rows = db.execute(f"SELECT * FROM video WHERE {where} ORDER BY {order} LIMIT 60 OFFSET ?",
                               (*params, 60 * (page - 1)))
-            return jsonify(total=total, videos=[library_video(row, db) for row in rows])
+            profiles = {}
+            return jsonify(total=total, videos=[library_video(row, db, profiles, summary) for row in rows])
 
     @app.delete("/api/videos/<video_id>")
     def remove_video(video_id):

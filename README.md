@@ -19,6 +19,12 @@ docker compose up -d --build --wait
 
 Open [GridTube](http://localhost:3987). The default bind address is 127.0.0.1. To use it on a trusted local network, set `GRIDTUBE_BIND` to your host's LAN IP address. `GRIDTUBE_PORT` changes the host port. GridTube currently has no user authentication.
 
+### ARM64 and small servers
+
+The same Compose command builds GridTube on a 64-bit Docker host, including boards such as the Orange Pi Zero 3 running a 64-bit Linux distribution. `uname -m` should report `aarch64` on the board. Serve the library from the board and play it in a browser on your local network. The browser decodes the video and its codec support determines playback compatibility.
+
+Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The default is 4096 MiB. The cache holds temporary versions for alternate audio and keeps the version being prepared even if it exceeds the target. The original files stay in the library. Keeping the archive on a USB drive leaves space on the system card.
+
 ## Use the archive
 
 1. Choose **Add channel** to browse a channel or **Download link** to save an individual video.

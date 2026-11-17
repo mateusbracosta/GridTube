@@ -14,6 +14,12 @@ docker compose up -d --build
 
 Abra [GridTube](http://localhost:3987). A porta é publicada no loopback por padrão. Para servir outros aparelhos da sua rede de confiança, configure `GRIDTUBE_BIND` com o IP LAN do host. O app é de uso local e esta versão opera sem contas de usuário.
 
+### Orange Pi e outros servidores ARM64
+
+Use o mesmo comando do Compose numa instalação Linux de 64 bits com Docker. Na Orange Pi Zero 3, confira se `uname -m` retorna `aarch64`. A placa pode servir a biblioteca pela rede local. Quem decodifica o vídeo é o navegador, e a compatibilidade depende dos codecs que o aparelho usado para assistir suporta.
+
+Se o espaço for limitado, defina `GRIDTUBE_PLAYBACK_CACHE_MIB=512` no `.env`. O padrão é 4096 MiB. Esse cache guarda as variantes temporárias de reprodução com áudio alternativo. A variante sendo preparada fica disponível mesmo quando supera o limite. Os arquivos originais ficam na biblioteca. Um disco USB para o acervo libera espaço no cartão do sistema.
+
 ## Atualizar a instalação
 
 Depois de atualizar o código, execute na mesma pasta:
@@ -83,8 +89,8 @@ Para levar só a mídia, copie `archive/library` ou as pastas desejadas. Para us
 Com o serviço parado, copie `data/` e `archive/library/` para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.6.tar gridtube:0.6
-docker load -i gridtube-0.6.tar
+docker save -o gridtube-0.7.tar gridtube:0.7
+docker load -i gridtube-0.7.tar
 docker compose up -d --no-build --pull never
 ~~~
 

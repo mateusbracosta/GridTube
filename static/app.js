@@ -206,6 +206,7 @@ let state = {channels:[],playlists:[],counts:{},settings:{}};
 let scope = "", search = "", page = 1, lastRequest = 0, prior = "", displayed = [];
 let catalog = null, flashTimer;
 let watchCleanup = null, watchVideo = null, routeRequest = 0;
+let stateRequest = 0, lastRefresh = -Infinity, backgroundRefreshPending = false;
 history.scrollRestoration = "manual";
 const t = key => translations[key]?.[Number(locale === "en")] || key;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
@@ -325,7 +326,7 @@ async function showLocation(autoplay=false, restore=false) {
 }
 
 async function loadNext(item, player) {
-  const {videos} = await api("/videos");
+  const {videos} = await api("/videos?summary=1");
   const available = videos.filter(video=>video.id!==item.id);
   const preferred = item.channel_id ? available.filter(video=>video.channel_id===item.channel_id) : [];
   const next = [...preferred,...available.filter(video=>!preferred.includes(video))].slice(0,7);
@@ -387,9 +388,22 @@ function nav() {
   }
 }
 async function refresh() {
-  state = await api("/state");
+  const request = ++stateRequest;
+  lastRefresh = performance.now();
+  const next = await api("/state");
+  if (request!==stateRequest) return;
+  state = next;
   nav();
   await loadLibrary();
+}
+async function backgroundRefresh(force=false) {
+  if (document.hidden || modal.open || watchPath() || backgroundRefreshPending) return;
+  const busy = scope==="downloads" || state.counts.queued || state.counts.running;
+  if (!force && performance.now()-lastRefresh<(busy?3500:15000)) return;
+  backgroundRefreshPending = true;
+  try { await refresh(); }
+  catch { /* The next foreground poll can retry. */ }
+  finally { backgroundRefreshPending = false; }
 }
 function pages(current,total,size,action) {
   const max = Math.ceil(total/size);
@@ -400,7 +414,7 @@ function pages(current,total,size,action) {
 async function loadLibrary() {
   if (watchPath()) return;
   const id = ++lastRequest;
-  const query = new URLSearchParams({scope,q:search,page,state:({downloads:"jobs",removed:"removed"})[scope]||"ready"});
+  const query = new URLSearchParams({summary:"1",scope,q:search,page,state:({downloads:"jobs",removed:"removed"})[scope]||"ready"});
   try {
     const {videos,total} = await api(`/videos?${query}`);
     if (id!==lastRequest) return;
@@ -478,7 +492,7 @@ function settingsTab(panel) {
 
 async function pollSystem() {
   const panel = get("settings-system");
-  if (!modal.open || !panel || panel.hidden || panel.dataset.fetching) return;
+  if (document.hidden || !modal.open || !panel || panel.hidden || panel.dataset.fetching) return;
   panel.dataset.fetching = "1";
   const status = get("dependency-status"), alert = get("dependency-error"), history = get("system-events");
   const restart = panel.querySelector('[data-action="restartDependency"]');
@@ -848,7 +862,7 @@ function watch(item, initialJobs=[], autoplay=false) {
   let video = item, jobs = initialJobs, offered = null;
   let audio = "", subtitle = "", signature = "", trackSignature = "", availableSignature = "";
   let last = item.position || 0, requestedTime = last, resume = autoplay, initialized = false;
-  let polling = false, closed = false, loadingNext = false;
+  let polling = false, closed = false, loadingNext = false, lastPoll = performance.now();
 
   const active = () => !closed && get("player") === player;
   const videoUrl = () => audio
@@ -890,7 +904,8 @@ function watch(item, initialJobs=[], autoplay=false) {
     saved.querySelector("[name=watchAudio]").value = "";
     changeAudio("",requestedTime,resume);
   };
-  player.ontimeupdate = ()=>{if(Math.abs(player.currentTime-last)>=5) update(player.currentTime);};
+  player.ontimeupdate = ()=>{if(Math.abs(player.currentTime-last)>=10) update(player.currentTime);};
+  player.onseeked = ()=>update(player.currentTime);
   player.onpause = ()=>update(player.ended?0:player.currentTime);
   player.onended = ()=>update(0);
 
@@ -1003,6 +1018,7 @@ function watch(item, initialJobs=[], autoplay=false) {
     if (!active()||polling) return;
     ensureSuggestions();
     polling = true;
+    lastPoll = performance.now();
     try {
       const result = await api(endpoint);
       if (!active()) return;
@@ -1090,7 +1106,10 @@ function watch(item, initialJobs=[], autoplay=false) {
   window.addEventListener("keydown",activateShortcut);
   render();
   ensureSuggestions();
-  const timer = setInterval(poll, 2500);
+  const timer = setInterval(()=>{
+    const pending = jobs.some(job=>job.state==="queued" || job.state==="running");
+    if (!document.hidden && (pending || settingsMenu.open || performance.now()-lastPoll>=15000)) poll();
+  },2500);
   const onHide = ()=>update(player.ended?0:player.currentTime,true);
   window.addEventListener("pagehide",onHide);
   watchCleanup = ()=>{
@@ -1206,8 +1225,9 @@ document.addEventListener("click",event=>{
   act(target.dataset.action,target.dataset.value||"").catch(error=>flash(t(error.message)));
 });
 window.addEventListener("popstate",()=>showLocation(false,true));
+document.addEventListener("visibilitychange",()=>backgroundRefresh(true));
 shell();
 refresh().catch(error=>flash(t(error.message)));
-setInterval(()=>{if((catalog?.pending||catalog?.autoPoll)&&modal.open) pollCatalog(catalog);},1600);
+setInterval(()=>{if(!document.hidden&&(catalog?.pending||catalog?.autoPoll)&&modal.open) pollCatalog(catalog);},1600);
 setInterval(pollSystem,1800);
-setInterval(()=>{if(!modal.open) refresh().catch(()=>{});},4000);
+setInterval(backgroundRefresh,4000);

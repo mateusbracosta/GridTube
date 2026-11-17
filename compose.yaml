@@ -1,6 +1,6 @@
 services:
   untube:
-    image: gridtube:0.6
+    image: gridtube:0.7
     build: .
     ports:
       - "${GRIDTUBE_BIND:-${UNTUBE_BIND:-127.0.0.1}}:${GRIDTUBE_PORT:-${UNTUBE_PORT:-3987}}:8080"
@@ -8,12 +8,13 @@ services:
       DATA_DIR: /data
       ARCHIVE_DIR: /archive
       GRIDTUBE_RESTART_IN_DOCKER: "1"
+      GRIDTUBE_PLAYBACK_CACHE_MIB: "${GRIDTUBE_PLAYBACK_CACHE_MIB:-4096}"
     volumes:
       - ./data:/data
       - ./archive:/archive
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/state', timeout=3).close()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).close()"]
       interval: 30s
       timeout: 5s
       retries: 3
