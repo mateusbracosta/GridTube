@@ -935,9 +935,9 @@ class Archive:
         for channel in channels:
             try:
                 entries = [entry for _, entry in collector.channel_entries(channel["source"], limit=30) if entry]
-                with self.db() as db:
-                    current = self.channel(db, channel["id"])
-                    if not current["auto"]:
+                with self.files_lock, self.db() as db:
+                    current = db.execute("SELECT * FROM channel WHERE id=?", (channel["id"],)).fetchone()
+                    if not current or not current["auto"]:
                         continue
                     prefs = self.effective(db, current)
                     for entry in entries:
@@ -1329,43 +1329,144 @@ class Archive:
         if not collector.VIDEO_ID.fullmatch(video_id):
             abort(404)
         with self.files_lock:
-            if disk and self.exporting[video_id]:
-                raise ValueError("playlist_export_busy")
-            if disk and self.preparing_playback[video_id]:
-                raise ValueError("playback_busy")
-            with self.db() as db:
-                row = db.execute("SELECT * FROM video WHERE id=? AND state IN ('ready','removed')",
-                                 (video_id,)).fetchone()
-                if row is None:
-                    abort(404)
-                db.execute("UPDATE video SET state='removed' WHERE id=?", (video_id,))
-            self.refresh_video_playlists(video_id)
-            if not disk:
-                return
+            self.remove_video_locked(video_id, disk)
 
-            try:
-                target = self.video_bundle(row)
-                staged = self.work / "deleting" / video_id
-                if staged.resolve() != staged:
+    def remove_video_locked(self, video_id, disk, refresh=True):
+        if disk and self.exporting[video_id]:
+            raise ValueError("playlist_export_busy")
+        if disk and self.preparing_playback[video_id]:
+            raise ValueError("playback_busy")
+        with self.db() as db:
+            row = db.execute("SELECT * FROM video WHERE id=? AND state IN ('ready','removed')",
+                             (video_id,)).fetchone()
+            if row is None:
+                abort(404)
+            db.execute("UPDATE video SET state='removed' WHERE id=?", (video_id,))
+        if refresh:
+            self.refresh_video_playlists(video_id)
+        if not disk:
+            return
+
+        try:
+            target = self.video_bundle(row)
+            staged = self.work / "deleting" / video_id
+            if staged.resolve() != staged:
+                raise ValueError("delete_invalid_folder")
+            if target.exists():
+                if staged.exists() or not target.is_dir():
                     raise ValueError("delete_invalid_folder")
-                if target.exists():
-                    if staged.exists() or not target.is_dir():
-                        raise ValueError("delete_invalid_folder")
-                    staged.parent.mkdir(parents=True, exist_ok=True)
-                    target.rename(staged)
-                self.clear_video_cache(row, staged)
-                if staged.exists():
-                    shutil.rmtree(staged)
-            except (OSError, ValueError) as exc:
-                logging.exception("Disk removal failed for %s", video_id)
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                target.rename(staged)
+            self.clear_video_cache(row, staged)
+            if staged.exists():
+                shutil.rmtree(staged)
+        except (OSError, ValueError) as exc:
+            logging.exception("Disk removal failed for %s", video_id)
+            with self.db() as db:
+                system_event(db, "library", "delete_disk_failed", exc, "error")
+            raise ValueError("delete_disk_failed") from exc
+
+        with self.db() as db:
+            if row["channel_id"]:
+                db.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (row["channel_id"], video_id))
+            db.execute("DELETE FROM video WHERE id=?", (video_id,))
+
+    def collection_videos(self, db, kind, collection_id):
+        if kind not in {"channel", "playlist"} or not re.fullmatch(r"[a-f0-9]{10}", collection_id):
+            abort(404)
+        collection = db.execute(f"SELECT * FROM {kind} WHERE id=?", (collection_id,)).fetchone()
+        if collection is None:
+            abort(404)
+        if kind == "channel":
+            rows = db.execute("SELECT * FROM video WHERE channel_id=? ORDER BY id", (collection_id,)).fetchall()
+        else:
+            rows = db.execute("""SELECT v.* FROM video v JOIN playlist_item p ON p.video_id=v.id
+                WHERE p.playlist_id=? ORDER BY v.id""", (collection_id,)).fetchall()
+        return collection, rows
+
+    def deletion_preview(self, kind, collection_id):
+        with self.files_lock, self.db() as db:
+            collection, rows = self.collection_videos(db, kind, collection_id)
+            shared = sum(bool(db.execute("SELECT 1 FROM playlist_item WHERE video_id=? AND playlist_id<>? LIMIT 1",
+                                        (row["id"], collection_id if kind == "playlist" else "")).fetchone())
+                         for row in rows)
+            return {"name": collection["name"], "ids": [row["id"] for row in rows], "shared": shared}
+
+    def remove_videos(self, ids, disk, collection=None):
+        if type(disk) is not bool:
+            raise ValueError("invalid_delete_option")
+        if not valid_selection(ids) or len(ids) > 20000:
+            raise ValueError("invalid_selection")
+        ids = set(ids)
+        with self.files_lock:
+            if self.pending_maintenance.exists():
+                raise ValueError("maintenance_pending")
+            with self.db() as db:
+                if collection:
+                    kind, collection_id = collection
+                    info, rows = self.collection_videos(db, kind, collection_id)
+                    if any(row["id"] not in ids for row in rows):
+                        raise ValueError("collection_changed")
+                    if kind == "channel" and db.execute(
+                            "SELECT 1 FROM video WHERE pending_channel=? LIMIT 1", (collection_id,)).fetchone():
+                        raise ValueError("collection_busy")
+                else:
+                    rows = []
+                    selected = sorted(ids)
+                    for offset in range(0, len(selected), 500):
+                        batch = selected[offset:offset + 500]
+                        rows.extend(db.execute(f"SELECT * FROM video WHERE id IN ({','.join('?' for _ in batch)})", batch))
+                if disk and any(self.exporting[row["id"]] for row in rows):
+                    raise ValueError("playlist_export_busy")
+                if disk and any(self.preparing_playback[row["id"]] for row in rows):
+                    raise ValueError("playback_busy")
+                active = [row for row in rows if row["state"] in {"running", "cancelling"}]
+                if active:
+                    for row in rows:
+                        if row["state"] in {"queued", "failed"}:
+                            self.finish_cancellation(db, row)
+                    for row in active:
+                        db.execute("UPDATE video SET state='cancelling' WHERE id=?", (row["id"],))
+                    self.capture_cancelled.set()
+                    return {"pending": True, "removed": 0}
+                if any(row["pending_folder"] for row in rows):
+                    raise ValueError("collection_busy")
+            # Refresh playlist projections once, including after a partial disk failure.
+            try:
+                for row in rows:
+                    if row["state"] not in {"ready", "removed"}:
+                        with self.db() as db:
+                            cancelled = self.finish_cancellation(db, row)
+                        if not cancelled:
+                            raise ValueError("cancel_cleanup_failed")
+                        if not row["folder"]:
+                            continue
+                    self.remove_video_locked(row["id"], disk, refresh=False)
+                if collection:
+                    kind, collection_id = collection
+                    if kind == "playlist":
+                        folder = self.playlist_directory / f"{collector.safe_name(info['name'])} [{collection_id}]"
+                        if folder.resolve() != folder:
+                            raise ValueError("delete_invalid_folder")
+                        (folder / "playlist.m3u8").unlink(missing_ok=True)
+                        if folder.is_dir() and not any(folder.iterdir()):
+                            folder.rmdir()
+                    elif disk:
+                        folder = self.library / info["folder"]
+                        if folder.resolve() == folder and folder.is_dir() and not any(folder.iterdir()):
+                            folder.rmdir()
+                    with self.db() as db:
+                        if kind == "channel":
+                            db.execute("UPDATE video SET channel_id=NULL WHERE channel_id=?", (collection_id,))
+                        db.execute(f"DELETE FROM {kind} WHERE id=?", (collection_id,))
+            except OSError as exc:
                 with self.db() as db:
                     system_event(db, "library", "delete_disk_failed", exc, "error")
                 raise ValueError("delete_disk_failed") from exc
-
-            with self.db() as db:
-                if row["channel_id"]:
-                    db.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (row["channel_id"], video_id))
-                db.execute("DELETE FROM video WHERE id=?", (video_id,))
+            finally:
+                self.refresh_playlist_files()
+                self.changed.set()
+        return {"pending": False, "removed": len(rows)}
 
     def clear_video_cache(self, row, staged):
         if self.playback.resolve() != self.playback:
@@ -1688,7 +1789,7 @@ def create_app(data=None, root=None, workers=True):
         selected = data.get("selected", [])
         if not valid_selection(selected):
             raise ValueError("invalid_selection")
-        with archive.db() as db:
+        with archive.files_lock, archive.db() as db:
             scan = db.execute("SELECT * FROM scan WHERE source=?", (source,)).fetchone() if source else None
             name = label(data.get("name") or (scan["name"] if scan else None))
             channel = archive.create_channel(db, name, source,
@@ -1715,7 +1816,7 @@ def create_app(data=None, root=None, workers=True):
     @app.put("/api/channels/<channel_id>")
     def update_channel(channel_id):
         data = body()
-        with archive.db() as db:
+        with archive.files_lock, archive.db() as db:
             channel = archive.channel(db, channel_id)
             auto = int(bool(channel["source"]) and data.get("auto") is True)
             db.execute("""UPDATE channel SET name=?,overrides=?,auto=?,
@@ -1787,7 +1888,7 @@ def create_app(data=None, root=None, workers=True):
         selected = body().get("selected")
         if not valid_selection(selected):
             raise ValueError("invalid_selection")
-        with archive.db() as db:
+        with archive.files_lock, archive.db() as db:
             channel = archive.channel(db, channel_id)
             prefs = archive.effective(db, channel)
             count = 0
@@ -1805,7 +1906,7 @@ def create_app(data=None, root=None, workers=True):
         url, video_id = collector.youtube_url(data.get("url"), "video")
         overrides = capture_preferences(data.get("overrides", {}))
         kind = "shorts" if "/shorts/" in url else "videos"
-        with archive.db() as db:
+        with archive.files_lock, archive.db() as db:
             channel = archive.channel(db, data.get("channel"))
             prefs = {**archive.effective(db, channel), **overrides}
             queued = archive.enqueue(db, {"id": video_id, "url": url, "title": video_id, "kind": kind},
@@ -1868,6 +1969,26 @@ def create_app(data=None, root=None, workers=True):
             raise ValueError("invalid_delete_option")
         archive.remove_video(video_id, disk)
         return jsonify(ok=True)
+
+    @app.post("/api/videos/delete")
+    def remove_selected_videos():
+        data = local_change()
+        result = archive.remove_videos(data.get("ids"), data.get("disk"))
+        return jsonify(result), 202 if result["pending"] else 200
+
+    @app.get("/api/channels/<collection_id>/delete-preview")
+    @app.get("/api/playlists/<collection_id>/delete-preview")
+    def collection_delete_preview(collection_id):
+        kind = "channel" if request.path.startswith("/api/channels/") else "playlist"
+        return jsonify(archive.deletion_preview(kind, collection_id))
+
+    @app.delete("/api/channels/<collection_id>")
+    @app.delete("/api/playlists/<collection_id>")
+    def remove_collection(collection_id):
+        data = local_change()
+        kind = "channel" if request.path.startswith("/api/channels/") else "playlist"
+        result = archive.remove_videos(data.get("ids"), data.get("disk"), (kind, collection_id))
+        return jsonify(result), 202 if result["pending"] else 200
 
     @app.post("/api/videos/<video_id>/restore")
     def restore_video(video_id):

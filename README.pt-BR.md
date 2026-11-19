@@ -54,6 +54,12 @@ O Compose recria o container quando a configuração ou a imagem muda. A bibliot
 
 Em canais locais, escolha **Ícone e cor** ao criar ou editar. Nas playlists criadas no app, use **Personalizar** no cabeçalho. As escolhas aparecem na barra lateral e nos cabeçalhos e são incluídas no backup do catálogo.
 
+Use as caixas de seleção dos cartões e linhas para marcar vários vídeos. **Selecionar esta página** marca os itens visíveis; a seleção é mantida ao trocar de página. Shift + clique seleciona um intervalo na página atual. Trocar de coleção ou busca limpa a seleção. **Excluir selecionados** oferece manter os arquivos ou apagá-los do disco.
+
+Os cabeçalhos de canais e playlists oferecem **Excluir canal e vídeos** e **Excluir playlist e vídeos**. A confirmação inclui todos os itens da coleção, de todas as páginas, e avisa sobre vídeos compartilhados com outras playlists. Excluir os vídeos de uma playlist afeta os mesmos vídeos na biblioteca inteira. Mantendo os arquivos, os vídeos ficam em **Removidos**; depois de excluir um canal, os vídeos restaurados ficam em **Avulsos**. Downloads em andamento são interrompidos antes de apagar seus arquivos. A coleção excluída não é preservada.
+
+Em **Organizar vídeo**, as listas de canais e playlists incluem **Criar novo canal…** e **Criar nova playlist…**. Salvar o formulário de criação move ou adiciona o vídeo automaticamente. Ações de exclusão usam vermelho e lixeira; confirmações para apagar do disco têm botão vermelho preenchido.
+
 Em **Downloads**, links avulsos exibem o título assim que o YouTube o disponibiliza. Enquanto o nome estiver indisponível, a fila exibe o identificador do vídeo. A porcentagem acompanha a fase atual. A transferência de vídeo e áudio usa os bytes baixados, e a montagem usa a posição processada que o FFmpeg informa. A interface marca estimativas e usa uma barra indeterminada quando a etapa não tem uma medida de progresso.
 
 Use **Cancelar** para tirar um item da fila ou interromper um download e sua montagem. O item em andamento mostra **Cancelando…** enquanto encerra o processo e limpa os temporários. Uma consulta de rede em curso pode precisar terminar antes do cancelamento ser concluído. Use **Remover tentativa** para limpar uma falha da lista. Você pode adicionar o vídeo novamente depois.
@@ -128,7 +134,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.11.tar gridtube:0.7.11
+docker save -o gridtube-0.7.11.tar gridtube:0.7.12
 docker load -i gridtube-0.7.11.tar
 docker compose up -d --no-build --pull never
 ~~~
@@ -146,6 +152,3 @@ Em **Configurações → Sistema**, exporte `gridtube-backup.jsonl` para levar o
 Para migrar, copie a pasta do acervo para o novo host antes de restaurar. Vídeos com arquivos ausentes ficam em **Removidos** e podem ser restaurados depois de copiar os arquivos.
 
 Em **Limpar dados do app**, digite `RESET` para apagar os dados do app e manter `library/`. Para apagar também os vídeos e os arquivos auxiliares dessa biblioteca, marque a caixa de exclusão no HD e digite `RESET MEDIA`. A restauração e a limpeza entram em vigor na reinicialização do serviço.
-
-
-GridTube é um projeto independente inspirado pelo [UnTube](https://github.com/tomfriart/untube).

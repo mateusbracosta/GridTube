@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Aplicação própria de preservação de vídeos, com referência funcional no [UnTube](https://github.com/tomfriart/untube). A aquisição consulta o YouTube quando há rede. O acervo, as imagens de canais já obtidas, os metadados, a busca, as playlists e a reprodução usam o servidor local. Os comandos de instalação e atualização estão no [README](README.md).
+Aplicação de preservação de vídeos. A aquisição consulta o YouTube quando há rede. O acervo, as imagens de canais já obtidas, os metadados, a busca, as playlists e a reprodução usam o servidor local. Os comandos de instalação e atualização estão no [README](README.md).
 
 ## Componentes
 
@@ -65,9 +65,15 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.11 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+A exclusão em lote usa `POST /api/videos/delete` com `ids` e `disk`. Canais e playlists oferecem `GET /api/{channels|playlists}/{id}/delete-preview` e `DELETE /api/{channels|playlists}/{id}` com os IDs conferidos na prévia e a escolha de disco. A prévia inclui todas as páginas e itens da fila. Se houver novos membros antes da confirmação, a exclusão exige uma nova prévia. Downloads ativos entram em cancelamento e retornam HTTP 202; a interface repete a operação após a interrupção. Requisições repetidas toleram IDs já excluídos.
 
-A suíte cobre publicação e recuperação da fila, cancelamento, remoção de faixas, alterações externas no acervo, exportação, restauração com rollback, personalização de coleções, validação da API e reprodução concorrente à preparação de áudio. Para testar ARM64 em outro host, construa com `docker build --platform linux/arm64 -t gridtube:0.7.11-arm64 .` e use essa plataforma e imagem no comando dos testes. A emulação verifica compatibilidade funcional; medições de desempenho da placa exigem a Orange Pi física.
+Arquivos de vídeos são removidos pelo mesmo procedimento de exclusão individual. A trava de arquivos protege o lote de movimentações e publicações simultâneas. Exportações e preparação de áudio impedem a exclusão física antes de alterar o lote. Projeções M3U são atualizadas uma vez ao final, inclusive em falha parcial, e a coleção permanece até terminar a exclusão dos vídeos. Manter arquivos preserva os registros em Removidos; excluir o canal remove os vínculos ao canal sem mover os arquivos e permite restaurá-los em Avulsos. Arquivos não reconhecidos nas pastas das coleções são preservados.
+
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.12 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+
+Para verificar seleção e exclusão na interface, execute `node tests/ui_collections.cjs` na raiz do projeto com Node.js 22 ou superior e Chromium/Chrome instalado. `GRIDTUBE_CHROME` pode indicar o executável. O roteiro abre um navegador sem janela, usa perfil temporário e dados sintéticos e testa seleção entre páginas, Shift + clique, confirmações, espera do cancelamento, criação unificada e layout móvel, sem acessar os dados da instalação.
+
+A suíte cobre publicação e recuperação da fila, cancelamento, remoção de faixas, alterações externas no acervo, exportação, restauração com rollback, personalização de coleções, validação da API e reprodução concorrente à preparação de áudio. Para testar ARM64 em outro host, construa com `docker build --platform linux/arm64 -t gridtube:0.7.12-arm64 .` e use essa plataforma e imagem no comando dos testes. A emulação verifica compatibilidade funcional; medições de desempenho da placa exigem a Orange Pi física.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 

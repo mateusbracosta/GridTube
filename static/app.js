@@ -96,6 +96,23 @@ const translations = {
   download_completed: ["Vídeo salvo","Video saved"],
   removed: ["Removidos","Removed"],
   removeVideo: ["Excluir vídeo","Remove video"],
+  deleteChannel: ["Excluir canal e vídeos","Delete channel and videos"],
+  deletePlaylist: ["Excluir playlist e vídeos","Delete playlist and videos"],
+  selectVideo: ["Selecionar vídeo","Select video"],
+  selectPage: ["Selecionar esta página","Select this page"],
+  deleteSelected: ["Excluir selecionados","Delete selected"],
+  selectedVideos: ["vídeos selecionados","videos selected"],
+  selectedVideoOne: ["vídeo selecionado","video selected"],
+  collectionDeleteHelp: ["A coleção e todos os seus vídeos serão removidos da biblioteca, incluindo itens de outras páginas e da fila. Você escolhe abaixo se os arquivos também serão apagados do disco.","The collection and all its videos will be removed from the library, including other pages and queued items. Choose below whether to also erase the files from disk."],
+  sharedDeleteHelp: ["A exclusão afeta os vídeos na biblioteca inteira, mesmo quando aparecem em outras playlists. Playlists não possuem cópias separadas.","Deletion affects the videos throughout the library, including other playlists. Playlists do not hold separate copies."],
+  sharedVideos: ["Vídeos presentes em outras playlists","Videos present in other playlists"],
+  keepCollectionFiles: ["Excluir coleção e manter arquivos","Delete collection and keep files"],
+  deleteCollectionFiles: ["Excluir coleção e apagar arquivos","Delete collection and erase files"],
+  collectionKeepHelp: ["Mantendo os arquivos, os vídeos ficam em Removidos. Ao excluir um canal, os vídeos restaurados ficam em Avulsos. A coleção excluída não é restaurada junto.","When keeping files, videos stay in Removed. After deleting a channel, restored videos appear in Unfiled. The deleted collection is not restored with them."],
+  deletingVideos: ["Excluindo os itens…","Deleting items…"],
+  cancellingForDelete: ["Interrompendo os downloads selecionados antes de excluir…","Stopping selected downloads before deleting…"],
+  collection_changed: ["O conteúdo da coleção mudou. Feche esta janela e confira a exclusão novamente.","The collection contents changed. Close this window and review deletion again."],
+  collection_busy: ["Um vídeo está sendo publicado ou movido. Aguarde a conclusão e tente novamente.","A video is being saved or moved. Wait for it to finish and try again."],
   keepMedia: ["Remover da biblioteca","Remove from library"],
   deleteMedia: ["Excluir também do disco","Also delete from disk"],
   removeVideoNote: ["Remover da biblioteca mantém a pasta e permite restaurar o vídeo em Removidos. Excluir do disco apaga o vídeo e seus arquivos auxiliares.","Removing from the library keeps the folder and lets you restore the video from Removed. Deleting from disk erases the video and its sidecar files."],
@@ -108,6 +125,9 @@ const translations = {
   localChannel: ["Criar canal local","Create local channel"],
   addLink: ["Baixar por link","Download link"],
   addPlaylist: ["Nova playlist","New playlist"],
+  createChannelOption: ["+ Criar novo canal…","+ Create a new channel…"],
+  createPlaylistOption: ["+ Criar nova playlist…","+ Create a new playlist…"],
+  choosePlaylist: ["Escolha uma playlist","Choose a playlist"],
   search: ["Buscar na biblioteca","Search your library"],
   title: ["Seu acervo de vídeos","Your video archive"],
   intro: ["Guarde vídeos para assistir pela rede local, mesmo sem internet.","Save videos to watch on your local network, even without internet access."],
@@ -292,6 +312,8 @@ const appName = "GridTube";
 let locale = (localStorage.getItem("gridtube.locale") ?? localStorage.getItem("untube.locale")) === "en" ? "en" : "pt-BR";
 let state = {channels:[],playlists:[],counts:{},settings:{}};
 let scope = "", search = "", page = 1, lastRequest = 0, prior = "", displayed = [];
+const selectedVideos = new Map();
+let selectionContext = "", lastSelectedVideo = null;
 let catalog = null, flashTimer;
 let watchCleanup = null, watchVideo = null, routeRequest = 0;
 let stateRequest = 0, lastRefresh = -Infinity, backgroundRefreshPending = false;
@@ -305,7 +327,13 @@ const youtubeLink = video => `<a class="youtube-source" target="_blank" rel="noo
 const channelOf = id => state.channels.find(c => c.id === id);
 const duration = seconds => seconds > 0
   ? [Math.floor(seconds/3600), Math.floor(seconds/60)%60, Math.floor(seconds)%60].slice(seconds<3600?1:0).map((n,i)=>i?String(n).padStart(2,"0"):n).join(":") : "";
-const btn = (action, text, glyph, css="", value="") => `<button type="button" data-action="${action}" data-value="${esc(value)}" class="${css}" aria-label="${esc(text)}" title="${esc(text)}">${glyph?icon(glyph):""}${css.includes("icon-only")?"":` <span>${esc(text)}</span>`}</button>`;
+const btn = (action, text, glyph, css="", value="") => {
+  if (["removeVideo","deleteChannel","deletePlaylist","deleteSelected","unplaylist"].includes(action)) {
+    css += " danger";
+    glyph ||= "trash";
+  }
+  return `<button type="button" data-action="${action}" data-value="${esc(value)}" class="${css}" aria-label="${esc(text)}" title="${esc(text)}">${glyph?icon(glyph):""}${css.includes("icon-only")?"":` <span>${esc(text)}</span>`}</button>`;
+};
 
 async function api(path, method="GET", data) {
   const payload = data instanceof FormData ? {body:data} : data===undefined ? {} :
@@ -524,10 +552,12 @@ async function loadLibrary() {
     const signature = JSON.stringify([scope,search,page,videos,total,state.channels,state.playlists]);
     if (prior===signature) return;
     prior=signature; displayed=videos;
+    const context = `${scope}\n${search}`;
+    if (selectionContext!==context) { selectedVideos.clear(); lastSelectedVideo=null; selectionContext=context; }
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
     const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
-    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
+    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}${btn("deleteChannel",t("deleteChannel"),"trash","flat",channel.id)}` : "";
     const home = !scope && !search && page===1, hero = home && videos[0];
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
       ${hero?.thumbnail?`<img src="${asset(hero.id,hero.thumbnail)}" alt="">`:'<div class="art" aria-hidden="true"></div>'}
@@ -536,19 +566,45 @@ async function loadLibrary() {
       </div></section><div class="section-head"><h2>${t("recent")}</h2></div>` :
       channel ? channelPage(channel,actions) : `<div class="page-head"><h1 class="${playlist?"collection-title":""}">${playlist?collectionMark(playlist,"list","heading"):""}${esc(title)}</h1>${playlist?
         `${btn("editPlaylist",t("customizeCollection"),"settings","",playlist.id)}
+        ${btn("deletePlaylist",t("deletePlaylist"),"trash","flat",playlist.id)}
         <a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
     const isQueue = scope==="downloads", isRemoved = scope==="removed";
     const results = videos.length
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
       : `<p class="empty">${t(search?"emptyCatalog":isQueue?"noJobs":"nothing")}</p>`;
-    get("library").innerHTML = head + results + pages(page,total,60,"page");
+    get("library").innerHTML = head + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
+    updateSelection();
   } catch (error) {
     if (id===lastRequest) { prior=""; get("library").textContent=t(error.message); }
   }
 }
+function selectionCheckbox(v) {
+  return `<label class="video-select" title="${esc(t("selectVideo"))}"><input type="checkbox" data-select-video="${v.id}"
+    aria-label="${esc(`${t("selectVideo")}: ${jobTitle(v)}`)}" ${selectedVideos.has(v.id)?"checked":""}></label>`;
+}
+function selectionToolbar() {
+  return `<div class="selection-toolbar" role="group" aria-label="${t("deleteSelected")}">
+    <label class="check"><input type="checkbox" id="select-page">${t("selectPage")}</label>
+    <span id="selected-count" aria-live="polite"></span>
+    ${btn("clearSelection",t("clearSelection"),"","flat")}${btn("deleteSelected",t("deleteSelected"),"trash","")}</div>`;
+}
+function selectionCount(count) { return `${count} ${t(count===1?"selectedVideoOne":"selectedVideos")}`; }
+function updateSelection() {
+  document.querySelectorAll("[data-select-video]").forEach(input=>{
+    input.checked=selectedVideos.has(input.dataset.selectVideo);
+    input.closest("article").classList.toggle("selected",input.checked);
+  });
+  const all=get("select-page"), count=displayed.filter(v=>selectedVideos.has(v.id)).length;
+  if (all) { all.checked=displayed.length>0&&count===displayed.length;all.indeterminate=count>0&&count<displayed.length; }
+  if (get("selected-count")) get("selected-count").textContent=selectionCount(selectedVideos.size);
+  for (const action of ["clearSelection","deleteSelected"]) {
+    const button=get("library").querySelector(`[data-action="${action}"]`);
+    if (button) button.disabled=!selectedVideos.size;
+  }
+}
 function card(v) {
   const length = duration(v.duration);
-  return `<article class="card"><a href="/watch/${v.id}" class="visual ${v.thumbnail?"":"no-thumb"}" data-action="watch" data-value="${v.id}" aria-label="${esc(`${t("play")} ${v.title}`)}">
+  return `<article class="card" data-video-id="${v.id}">${selectionCheckbox(v)}<a href="/watch/${v.id}" class="visual ${v.thumbnail?"":"no-thumb"}" data-action="watch" data-value="${v.id}" aria-label="${esc(`${t("play")} ${v.title}`)}">
     ${v.thumbnail?`<img src="${asset(v.id,v.thumbnail)}" alt="" loading="lazy">`:""}<span class="play">${icon("play")}</span>
     ${length?`<span class="timed">${length}</span>`:""}${v.position&&v.duration?`<progress max="${Number(v.duration)}" value="${Number(v.position)}"></progress>`:""}</a>
     <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small></div>
@@ -558,7 +614,7 @@ function jobTitle(v) {
   return v.title && v.title !== v.url && v.title !== v.id ? v.title : `${t("youtubeVideo")} · ${v.id}`;
 }
 function job(v) {
-  return `<article class="job"><div><strong>${esc(jobTitle(v))}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
+  return `<article class="job" data-video-id="${v.id}">${selectionCheckbox(v)}<div><strong>${esc(jobTitle(v))}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
     ${v.state==="running"?jobProgress(v):""}
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div><aside class="job-actions">
       ${v.state==="failed"?`${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}`:""}
@@ -576,7 +632,7 @@ function jobProgress(v) {
 }
 function removedRow(v) {
   const missing = v.error === "external_media_missing";
-  return `<article class="job"><div><strong>${esc(v.title)}</strong>${missing?`<small>${t(v.error)}</small>`:""}</div><aside class="job-actions">
+  return `<article class="job" data-video-id="${v.id}">${selectionCheckbox(v)}<div><strong>${esc(v.title)}</strong>${missing?`<small>${t(v.error)}</small>`:""}</div><aside class="job-actions">
     ${missing?btn("retry",t("downloadAgain"),"download","",v.id):""}
     ${btn("restoreVideo",t("restoreVideo"),"","",v.id)}${btn("removeVideo",t("deleteMedia"),"","flat",v.id)}</aside></article>`;
 }
@@ -605,7 +661,7 @@ function openSettings() {
       <details class="system-card"><summary>${t("resetTitle")}</summary><form id="reset-data-form" class="stack">
         <p class="note">${t("resetHelp")}</p>${checked("disk",t("resetDisk"),false)}
         <label>${t("resetConfirmInput")} <code id="reset-word">RESET</code><input name="confirmation" required maxlength="11" autocomplete="off"></label>
-        <p role="alert"></p><button type="submit" class="accent">${t("resetTitle")}</button>
+        <p role="alert"></p><button type="submit" class="danger danger-solid">${icon("trash")} ${t("resetTitle")}</button>
       </form></details>
       <section class="system-card"><h3>yt-dlp</h3><p class="note">${t("dependencyHelp")}</p>
         <p id="dependency-status" role="status"></p><p id="dependency-error" role="alert"></p>
@@ -861,7 +917,8 @@ async function finish(message=t("done")) {
   flash(message);
   await refresh();
 }
-function editChannel(channel) {
+function editChannel(channel, videoId) {
+  let createdId = null;
   const auto = channel ? `${checked("auto",t("auto"),channel.auto)}<small>${t("autoNote")}</small>` : "";
   simple(channel?"edit":"localChannel",`${field("name",channel?.name,"required maxlength=100")}
     ${channel?field("channelUrl",channel.source,"type=url"):""}
@@ -869,11 +926,16 @@ function editChannel(channel) {
     ${!channel?.source?collectionFields(channel,"folder"):""}
     <label>${t("channelDescription")}<textarea name="description" maxlength="5000" rows="3">${esc(channel?.custom_description||"")}</textarea></label>
     <p class="note">${t("configNote")}</p>${prefs(channel?.overrides||{},true)}${auto}`,"save",async data=>{
-    await api(channel?`/channels/${channel.id}`:"/channels",channel?"PUT":"POST",
+    const result=createdId?{id:createdId}:await api(channel?`/channels/${channel.id}`:"/channels",channel?"PUT":"POST",
       {name:data.get("name"),overrides:readPrefs(data),auto:data.has("auto"),description:data.get("description"),
         title_filter:data.get("titleFilter") ?? channel?.title_filter ?? "",
         ...(!channel?.source?{appearance:readAppearance(data)}:{}),
-        ...(channel?{source:data.get("channelUrl")}:{})}); await finish();
+        ...(channel?{source:data.get("channelUrl")}:{})});
+    if (videoId) {
+      createdId=result.id;
+      await api(`/videos/${videoId}/move`,"POST",{channel:createdId});
+    }
+    await finish();
   });
 }
 function collectionFields(collection, fallback="list") {
@@ -890,12 +952,12 @@ function collectionFields(collection, fallback="list") {
 function readAppearance(data) {
   return {icon:data.get("collectionIcon"),color:data.get("collectionColor")};
 }
-function editPlaylist(playlist) {
+function editPlaylist(playlist, videoId) {
   simple(playlist?"customizeCollection":"addPlaylist",
     (playlist?`<strong>${esc(playlist.name)}</strong>`:field("name","","required maxlength=100"))+collectionFields(playlist),
     "save",async data=>{
       await api(playlist?`/playlists/${playlist.id}/appearance`:"/playlists",playlist?"PUT":"POST",
-        {...(!playlist?{name:data.get("name")}:{}),appearance:readAppearance(data)});
+        {...(!playlist?{name:data.get("name")}:{}),...(videoId?{video:videoId}:{}),appearance:readAppearance(data)});
       await finish();
     });
 }
@@ -1193,7 +1255,7 @@ function watch(item, initialJobs=[], autoplay=false) {
 
   const trackTrash = (kind, code, savedTrack) => {
     const title = t(savedTrack ? "deleteTrack" : "deleteTrackAttempt");
-    return `<button type="button" class="flat track-trash" data-remove-track data-kind="${kind}" data-code="${esc(code)}"
+    return `<button type="button" class="flat danger track-trash" data-remove-track data-kind="${kind}" data-code="${esc(code)}"
       title="${title}" aria-label="${title}" ${savedTrack&&!code?"hidden":""}>${icon("trash")}</button>`;
   };
   async function deleteTrack(button, savedTrack) {
@@ -1438,17 +1500,22 @@ function organize(item) {
   if (!item) return;
   dialog(t("organize"),`<div class="dialog-body"><strong>${esc(item.title)}</strong>
     ${youtubeLink(item)}
-    <form id="move">${select("channel",t("move"),channels(t("unfiled")),item.channel_id||"")}
+    <form id="move">${select("channel",t("move"),[...channels(t("unfiled")),["__new__",t("createChannelOption")]],item.channel_id||"")}
     <button>${t("move")}</button></form>
-    <form id="new-channel">${field("newChannelName","","required maxlength=100")}<button>${t("createMove")}</button></form>
-    ${state.playlists.length?`<form id="add-to">${select("playlist",t("addTo"),state.playlists.map(p=>[p.id,p.name]),"")}<button>${t("addTo")}</button></form>`:""}
-    <form id="new-playlist">${field("newPlaylistName","","required maxlength=100")}<button>${t("addPlaylist")}</button></form>
+    <form id="add-to">${select("playlist",t("addTo"),[["",t("choosePlaylist")],...state.playlists.map(p=>[p.id,p.name]),["__new__",t("createPlaylistOption")]],"")}<button>${t("addTo")}</button></form>
     ${scope.startsWith("playlist:")?btn("unplaylist",t("removeFrom"),"","flat",item.id):""}
     ${btn("removeVideo",t("removeVideo"),"","flat",item.id)}</div>`);
-  bind("move",async data=>{await api(`/videos/${item.id}/move`,"POST",{channel:data.get("channel")});await finish();});
-  bind("new-channel",async data=>{await api(`/videos/${item.id}/move`,"POST",{name:data.get("newChannelName")});await finish();});
-  if (get("add-to")) bind("add-to",async data=>{await api(`/playlists/${data.get("playlist")}/videos/${item.id}`,"PUT");await finish();});
-  bind("new-playlist",async data=>{await api("/playlists","POST",{name:data.get("newPlaylistName"),video:item.id});await finish();});
+  get("move").elements.channel.onchange=event=>{if(event.target.value==="__new__") editChannel(undefined,item.id);};
+  get("add-to").elements.playlist.required=true;
+  get("add-to").elements.playlist.onchange=event=>{if(event.target.value==="__new__") editPlaylist(undefined,item.id);};
+  bind("move",async data=>{
+    if (data.get("channel")==="__new__") return editChannel(undefined,item.id);
+    await api(`/videos/${item.id}/move`,"POST",{channel:data.get("channel")});await finish();
+  });
+  bind("add-to",async data=>{
+    if (data.get("playlist")==="__new__") return editPlaylist(undefined,item.id);
+    await api(`/playlists/${data.get("playlist")}/videos/${item.id}`,"PUT");await finish();
+  });
 }
 
 function confirmRemove(item) {
@@ -1456,8 +1523,8 @@ function confirmRemove(item) {
   const removed = item.state==="removed";
   dialog(t("removeVideo"),`<form id="remove-video" class="dialog-body"><strong>${esc(item.title)}</strong>
     <p class="note">${t(removed?"deleteMediaNote":"removeVideoNote")}</p><p role="alert"></p>
-    <div class="system-actions">${removed?"":`<button type="submit" value="keep">${t("keepMedia")}</button>`}
-    <button type="submit" value="disk" class="accent">${t("deleteMedia")}</button></div></form>`);
+    <div class="system-actions">${removed?"":`<button type="submit" value="keep" class="danger">${icon("trash")} ${t("keepMedia")}</button>`}
+    <button type="submit" value="disk" class="danger danger-solid">${icon("trash")} ${t("deleteMedia")}</button></div></form>`);
   get("remove-video").onsubmit = async event=>{
     event.preventDefault();
     const form = event.currentTarget, alert = form.querySelector('[role="alert"]');
@@ -1472,6 +1539,54 @@ function confirmRemove(item) {
       alert.textContent=t(error.message);
       buttons.forEach(button=>button.disabled=false);
       await refresh().catch(()=>{});
+    }
+  };
+}
+
+async function confirmBulkRemove(kind, id) {
+  const collection=kind?await api(`/${kind}s/${id}/delete-preview`):null;
+  const videos=collection?null:[...selectedVideos.values()];
+  const ids=collection?collection.ids:videos.map(v=>v.id);
+  if (!collection&&!ids.length) return;
+  const title=collection?t(kind==="channel"?"deleteChannel":"deletePlaylist"):t("deleteSelected");
+  dialog(title,`<form id="remove-bulk" class="dialog-body">
+    ${collection?`<strong>${esc(collection.name)}</strong>`:""}
+    <strong>${selectionCount(ids.length)}</strong>
+    ${videos?`<ul class="deletion-titles">${videos.slice(0,8).map(v=>`<li>${esc(jobTitle(v))}</li>`).join("")}${videos.length>8?"<li>…</li>":""}</ul>`:""}
+    <p class="note">${t(collection?"collectionDeleteHelp":"removeVideoNote")}</p>
+    <p class="note">${t("sharedDeleteHelp")}</p>
+    ${collection?.shared?`<strong>${t("sharedVideos")}: ${collection.shared}</strong>`:""}
+    ${collection?`<p class="note">${t("collectionKeepHelp")}</p>`:""}
+    <p role="status"></p><p role="alert"></p><div class="system-actions">
+    <button type="submit" value="keep" class="danger">${icon("trash")} ${t(collection?"keepCollectionFiles":"keepMedia")}</button>
+    <button type="submit" value="disk" class="danger danger-solid">${icon("trash")} ${t(collection?"deleteCollectionFiles":"deleteMedia")}</button></div></form>`);
+  get("remove-bulk").onsubmit=async event=>{
+    event.preventDefault();
+    const form=event.currentTarget, buttons=[...modal.querySelectorAll("button")];
+    const alert=form.querySelector('[role="alert"]'), status=form.querySelector('[role="status"]');
+    const disk=event.submitter?.value==="disk";
+    const preventClose=event=>event.preventDefault();
+    buttons.forEach(button=>button.disabled=true);
+    modal.addEventListener("cancel",preventClose);
+    alert.textContent="";
+    try {
+      let result;
+      do {
+        status.textContent=t(result?.pending?"cancellingForDelete":"deletingVideos");
+        if (result?.pending) await new Promise(resolve=>setTimeout(resolve,1200));
+        result=await api(collection?`/${kind}s/${id}`:"/videos/delete",collection?"DELETE":"POST",{ids,disk});
+      } while (result.pending);
+      selectedVideos.clear();
+      if (collection) showLibrary("");
+      prior="";
+      await finish();
+    } catch (error) {
+      status.textContent="";
+      alert.textContent=t(error.message);
+      await refresh().catch(()=>{});
+    } finally {
+      modal.removeEventListener("cancel",preventClose);
+      buttons.forEach(button=>button.disabled=false);
     }
   };
 }
@@ -1516,6 +1631,10 @@ async function act(action,value) {
     case "restartDependency": await runMaintenance(true);break;
     case "addPlaylist": editPlaylist();break;
     case "editPlaylist": editPlaylist(state.playlists.find(p=>p.id===value));break;
+    case "deleteChannel": await confirmBulkRemove("channel",value);break;
+    case "deletePlaylist": await confirmBulkRemove("playlist",value);break;
+    case "deleteSelected": await confirmBulkRemove();break;
+    case "clearSelection": selectedVideos.clear();updateSelection();break;
     case "unplaylist": await api(`/playlists/${scope.slice(9)}/videos/${value}`,"DELETE");await finish();break;
     case "watch": openWatch(value);break;
     case "organize": organize(item);break;
@@ -1541,6 +1660,16 @@ async function act(action,value) {
   }
 }
 document.addEventListener("click",event=>{
+  const checkbox=event.target.closest("[data-select-video]");
+  if (checkbox) {
+    const id=checkbox.dataset.selectVideo, checked=checkbox.checked;
+    const index=displayed.findIndex(v=>v.id===id), previous=displayed.findIndex(v=>v.id===lastSelectedVideo);
+    const videos=event.shiftKey&&previous>=0?displayed.slice(Math.min(index,previous),Math.max(index,previous)+1):[displayed[index]];
+    videos.filter(Boolean).forEach(v=>checked?selectedVideos.set(v.id,v):selectedVideos.delete(v.id));
+    lastSelectedVideo=id;
+    updateSelection();
+    return;
+  }
   const target = event.target.closest("[data-action]");
   if (!target) return;
   if (target.matches("a")) {
@@ -1548,6 +1677,11 @@ document.addEventListener("click",event=>{
     event.preventDefault();
   }
   act(target.dataset.action,target.dataset.value||"").catch(error=>flash(t(error.message)));
+});
+document.addEventListener("change",event=>{
+  if (event.target.id!=="select-page") return;
+  displayed.forEach(v=>event.target.checked?selectedVideos.set(v.id,v):selectedVideos.delete(v.id));
+  updateSelection();
 });
 window.addEventListener("popstate",()=>showLocation(false,true));
 document.addEventListener("visibilitychange",()=>backgroundRefresh(true));

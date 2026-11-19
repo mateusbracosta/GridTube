@@ -50,6 +50,12 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 
 Choose **Icon and color** when creating or editing a local channel. For playlists created in the app, use **Customize** in the playlist header. The choices appear in the sidebar and headers and are included in the catalog backup.
 
+Use the checkboxes on video cards and rows to select several items. **Select this page** marks the visible page; selections are kept as you move between pages. Shift-click selects a range on the current page. Changing the collection or search clears the selection. **Delete selected** lets you keep the files or erase them from disk.
+
+The channel and playlist headers offer **Delete channel and videos** and **Delete playlist and videos**. The confirmation includes all collection items, across all pages, and warns about videos shared with other playlists. Deleting a playlist's videos affects those same videos throughout the library. Keeping files moves videos to **Removed**; deleting a channel leaves restored videos in **Unfiled**. Downloads are stopped before deleting their files. The deleted collection itself is not retained.
+
+Under **Organize video**, the channel and playlist selectors include **Create a new channel…** and **Create a new playlist…**. Saving the creation form moves or adds the current video automatically. Deletion actions have red styling and trash icons; disk-erasure confirmations use solid red buttons.
+
 Use **Cancel** to remove a queued item or interrupt a download and its muxing process. An active item shows **Cancelling…** until the process stops and its temporary files are cleared. An in-flight network request may need to finish first. **Remove attempt** clears a failed task from the list. You can add the video again later.
 
 In the player settings, use the trash button next to a selected extra track to delete its file from disk. The trash button next to a failed attempt clears the attempt. Video cards use the saved YouTube thumbnail when available and keep the watch position for the progress bar and playback resume.
@@ -84,4 +90,4 @@ Under **Settings → System**, choose **Update yt-dlp** to check the stable PyPI
 
 After updating the source, run the same Docker Compose command. The `data/` directory and the archive folder are bind-mounted and survive container recreation. Stop the service before copying both directories for a full migration. For an offline installation, also bring your Compose file and an image exported with Docker for the target machine's architecture.
 
-See the [architecture and operations notes (PT-BR)](ARQUITETURA.md) for storage, API routes, and recovery. GridTube is an independent project inspired by [UnTube](https://github.com/tomfriart/untube).
+See the [architecture and operations notes (PT-BR)](ARQUITETURA.md) for storage, API routes, and recovery.
