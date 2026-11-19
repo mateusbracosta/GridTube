@@ -68,7 +68,9 @@ GridTube updates paths and playlists for recognized moves. When the media is mis
 
 ### Backup, restore and clear app data
 
-Under **Settings → System**, export a catalog backup as `gridtube-backup.jsonl`. It includes channels, playlists, video records, download jobs, watch progress and preferences. The media files stay in the archive. To move to a new host, copy the archive and preview the backup before applying it. Missing videos appear in **Removed** and can be restored after copying their files.
+Under **Settings → System**, export a catalog backup as `gridtube-backup.jsonl`. It includes channels, playlists, video records, download jobs, watch progress and preferences. **Restore backup** opens a file picker. GridTube validates the selected file, applies its data when it restarts and verifies the database integrity and restored records. The screen confirms **Backup restored and verified** when the checks finish.
+
+The media files stay in the archive. To move to a new host, copy the archive before restoring its catalog. Missing videos appear in **Removed** and can be restored after copying their files.
 
 **Clear app data** resets the catalog, preferences and generated files. The default confirmation is `RESET` and keeps the media in `library/`. With disk deletion selected, type `RESET MEDIA` to also erase that library. Restore and reset apply when the service restarts.
 

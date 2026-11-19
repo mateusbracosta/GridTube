@@ -35,13 +35,19 @@ const translations = {
   backupHelp: ["Exporta o catálogo, as playlists, o progresso e as configurações. Para levar os vídeos, copie a pasta do acervo.","Exports the catalog, playlists, progress and settings. Copy the archive folder to bring the videos."],
   exportBackup: ["Exportar backup","Export backup"],
   importBackup: ["Arquivo de backup do GridTube","GridTube backup file"],
-  previewBackup: ["Conferir backup","Preview backup"],
-  restoreBackup: ["Restaurar este backup","Restore this backup"],
-  restoreWarning: ["A restauração substitui os dados atuais do app.","Restoring replaces the app's current data."],
+  backupRestoreHelp: ["Clique em Restaurar backup e escolha o arquivo. O GridTube valida, restaura, reinicia e verifica os dados restaurados.","Click Restore backup and choose a file. GridTube validates, restores, restarts and checks the restored data."],
+  backupValidating: ["Validando o arquivo de backup…","Validating the backup file…"],
+  backupRestoring: ["Backup validado. Preparando a restauração…","Backup validated. Preparing to restore…"],
+  backupVerifying: ["Verificando os dados restaurados…","Checking restored data…"],
+  restoreBackup: ["Restaurar backup","Restore backup"],
+  restoreWarning: ["Restaurar substitui o catálogo, as playlists, o progresso e as configurações atuais. Os dados são aplicados ao reiniciar o GridTube.","Restoring replaces the current catalog, playlists, progress and settings. Data is applied when GridTube restarts."],
   backupMissingFiles: ["vídeos com arquivo ausente ficarão em Removidos","videos with missing files will go to Removed"],
   backup_invalid: ["O arquivo não é um backup válido do GridTube.","This is not a valid GridTube backup."],
-  backup_preview_missing: ["Confira o backup novamente antes de restaurar.","Preview the backup again before restoring it."],
-  backup_restored: ["Backup restaurado.","Backup restored."],
+  backup_preview_missing: ["Selecione o arquivo de backup novamente.","Select the backup file again."],
+  backup_restored: ["Backup restaurado e verificado.","Backup restored and verified."],
+  backup_restore_failed: ["A restauração não foi concluída. Consulte o registro de atividade.","Restore did not complete. Check the activity log."],
+  backup_verification_failed: ["Os dados restaurados não passaram na verificação.","Restored data did not pass verification."],
+  backup_result_unknown: ["Não foi possível confirmar a restauração. Consulte o registro de atividade e confira se o GridTube reiniciou.","Could not confirm the restore. Check the activity log and whether GridTube restarted."],
   resetTitle: ["Limpar dados do app","Clear app data"],
   resetHelp: ["Limpa catálogo, fila, progresso e preferências. Marque a opção abaixo para apagar também os vídeos do acervo.","Clears the catalog, queue, progress and settings. Select the option below to also delete the archived videos."],
   resetDisk: ["Apagar vídeos e arquivos auxiliares do HD","Delete videos and their sidecar files from disk"],
@@ -550,11 +556,11 @@ function openSettings() {
       <p role="alert"></p><button class="accent" type="submit">${t("save")}</button></form>
     <div id="settings-system" class="stack" hidden>
       <section class="system-card"><h3>${t("backupTitle")}</h3><p class="note">${t("backupHelp")}</p>
-        <div class="system-actions"><a class="accent" href="/api/system/backup" download>${t("exportBackup")}</a></div>
-        <form id="backup-form" class="stack"><label>${t("importBackup")}<input name="backup" type="file" accept=".jsonl" required></label>
-        <p role="alert"></p><button type="submit">${t("previewBackup")}</button></form>
-        <form id="restore-backup-form" class="stack" hidden><p id="backup-preview"></p><p class="note">${t("restoreWarning")}</p>
-        <p role="alert"></p><button type="submit">${t("restoreBackup")}</button></form>
+        <div class="system-actions"><a class="accent" href="/api/system/backup" download>${t("exportBackup")}</a>
+          <button id="restore-backup" type="button">${t("restoreBackup")}</button></div>
+        <input id="backup-file" type="file" accept=".jsonl" aria-label="${t("importBackup")}" hidden>
+        <p class="note">${t("backupRestoreHelp")}</p><p class="note">${t("restoreWarning")}</p>
+        <p id="backup-preview"></p><p id="backup-error" role="alert"></p>
         <p id="system-change-status" role="status"></p></section>
       <section class="system-card"><h3>${t("libraryCheck")}</h3><p class="note">${t("libraryCheckHelp")}</p>
         <form id="library-check-form" class="stack">
@@ -582,15 +588,40 @@ function openSettings() {
       .map(([key,label])=>`${result[key]} ${t(label)}`).join(" · ") || t("libraryCheckEmpty");
     await refresh();
   });
-  bind("backup-form",async data=>{
-    get("restore-backup-form").hidden = true;
-    const preview = await api("/system/backup/preview","POST",data);
-    const summary = `${preview.channel} ${t("channels").toLowerCase()} · ${preview.playlist} ${t("playlists").toLowerCase()} · ${preview.video} ${t("videos").toLowerCase()}`;
-    get("backup-preview").textContent = preview.missing ? `${summary}. ${preview.missing} ${t("backupMissingFiles")}.` : summary;
-    const confirmation = get("restore-backup-form");
-    confirmation.hidden = false;
-    bind("restore-backup-form",()=>applySystemChange("/system/backup/restore",{token:preview.token}));
-  });
+  const backupFile = get("backup-file"), restoreButton = get("restore-backup");
+  const changeStatus = get("system-change-status"), backupError = get("backup-error");
+  const storedRestore = sessionStorage.getItem("gridtube.restoreToken");
+  if (storedRestore) {
+    get("settings-system").dataset.restoreToken = storedRestore;
+    restoreButton.disabled = true;
+    changeStatus.textContent = t("backupVerifying");
+  }
+  restoreButton.onclick = () => backupFile.click();
+  backupFile.onchange = async () => {
+    const file = backupFile.files[0];
+    if (!file) return;
+    restoreButton.disabled = backupFile.disabled = true;
+    backupError.textContent = "";
+    changeStatus.textContent = t("backupValidating");
+    get("backup-preview").textContent = "";
+    try {
+      const data = new FormData();
+      data.append("backup",file);
+      const preview = await api("/system/backup/preview","POST",data);
+      if (get("backup-file") !== backupFile) return;
+      const summary = `${preview.channel} ${t("channels").toLowerCase()} · ${preview.playlist} ${t("playlists").toLowerCase()} · ${preview.video} ${t("videos").toLowerCase()}`;
+      get("backup-preview").textContent = preview.missing ? `${summary}. ${preview.missing} ${t("backupMissingFiles")}.` : summary;
+      changeStatus.textContent = t("backupRestoring");
+      await applySystemChange("/system/backup/restore",{token:preview.token});
+    } catch (error) {
+      changeStatus.textContent = "";
+      backupError.textContent = t(error.message);
+    } finally {
+      backupFile.disabled = false;
+      backupFile.value = "";
+      restoreButton.disabled = Boolean(sessionStorage.getItem("gridtube.restoreToken"));
+    }
+  };
   const reset = get("reset-data-form");
   reset.elements.disk.onchange = () => {
     get("reset-word").textContent = reset.elements.disk.checked ? "RESET MEDIA" : "RESET";
@@ -605,9 +636,15 @@ function openSettings() {
 async function applySystemChange(path, data) {
   const result = await api(path,"POST",data);
   const panel = get("settings-system");
+  if (path === "/system/backup/restore") {
+    sessionStorage.setItem("gridtube.restoreToken",data.token);
+    sessionStorage.setItem("gridtube.restoreDeadline",String(Date.now()+180000));
+    if (panel) panel.dataset.restoreToken = data.token;
+  }
+  if (!panel) return;
   panel.dataset.maintenance = "1";
   get("system-change-status").textContent = t(result.restarting?"restarting":"maintenanceManual");
-  get("restore-backup-form").hidden = true;
+  get("restore-backup").disabled = true;
   get("reset-data-form").reset();
   get("reset-word").textContent = "RESET";
   get("system-change-status").scrollIntoView({block:"nearest"});
@@ -644,10 +681,29 @@ async function pollSystem() {
       updating && !waiting && t("dependencyChecking"), pending && !can_restart && t("restartPending")].filter(Boolean).join(" · ");
     const lastUpdate = result.events.find(event=>event.area==="dependency");
     alert.textContent = t(problem || (lastUpdate?.severity==="error" ? lastUpdate.code : "")) || "";
-    if (panel.dataset.maintenance && !result.maintenance_pending) {
+    const restoreToken = panel.dataset.restoreToken;
+    if (restoreToken) {
+      const restored = await api(`/system/backup/status/${encodeURIComponent(restoreToken)}`);
+      if (!panel.isConnected) return;
+      const expired = Date.now() > Number(sessionStorage.getItem("gridtube.restoreDeadline") || 0);
+      if (["verified","failed"].includes(restored.status) || expired && restored.status === "unknown") {
+        get("system-change-status").textContent = t(restored.status === "verified" ? "backup_restored"
+          : restored.status === "failed" ? "backup_restore_failed" : "backup_result_unknown");
+        sessionStorage.removeItem("gridtube.restoreToken");
+        sessionStorage.removeItem("gridtube.restoreDeadline");
+        delete panel.dataset.restoreToken;
+        delete panel.dataset.maintenance;
+        get("restore-backup").disabled = false;
+        refresh().catch(()=>{});
+      } else {
+        get("system-change-status").textContent = t(restored.status === "pending"
+          ? can_restart ? "restarting" : "maintenanceManual" : "backupVerifying");
+      }
+    } else if (panel.dataset.maintenance && !result.maintenance_pending) {
       delete panel.dataset.maintenance;
       const event = result.events.find(entry=>entry.area==="system");
       get("system-change-status").textContent = t(event?.code || "done");
+      get("restore-backup").disabled = false;
       refresh().catch(()=>{});
     }
     const signature = JSON.stringify(result.events);
@@ -655,7 +711,7 @@ async function pollSystem() {
       const date = new Intl.DateTimeFormat(locale,{dateStyle:"short",timeStyle:"medium"});
       history.innerHTML = result.events.length ? `<ul class="system-events">${result.events.map(event=>
         `<li class="${event.severity==="error"?"system-error":""}"><time>${date.format(event.timestamp*1000)}</time>
-        <strong>${esc(t(event.code))}</strong>${event.detail?`<pre>${esc(event.detail)}</pre>`:""}</li>`).join("")}</ul>` :
+        <strong>${esc(t(event.code))}</strong>${event.detail&&!["backup_restored","backup_restore_failed"].includes(event.code)?`<pre>${esc(event.detail)}</pre>`:""}</li>`).join("")}</ul>` :
         `<p class="note">${t("noActivity")}</p>`;
       history.dataset.rendered = signature;
     }

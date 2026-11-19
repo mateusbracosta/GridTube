@@ -424,6 +424,7 @@ class Archive:
         if not self.pending_maintenance.is_file():
             return
         candidate = None
+        operation = {}
         try:
             operation = json.loads(self.pending_maintenance.read_text(encoding="utf-8"))
             action = operation["action"]
@@ -443,17 +444,25 @@ class Archive:
             with self.db() as db:
                 catalog_backup.replace_catalog(db, candidate)
                 db.execute("INSERT OR IGNORE INTO settings VALUES (1,?)", (encode(DEFAULTS),))
+                if candidate:
+                    catalog_backup.verify_restored_catalog(db)
             for path in targets:
                 if path.exists():
                     shutil.rmtree(path)
                 path.mkdir()
             self.playback.mkdir(exist_ok=True)
             with self.db() as db:
-                system_event(db, "system", "backup_restored" if action == "restore" else "data_reset")
+                if candidate:
+                    db.execute("ATTACH DATABASE ? AS restored", (str(candidate),))
+                    catalog_backup.verify_restored_catalog(db)
+                system_event(db, "system", "backup_restored" if action == "restore" else "data_reset",
+                             operation.get("token"))
         except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
             logging.exception("Could not complete the staged maintenance operation")
             with self.db() as db:
                 system_event(db, "system", "maintenance_failed", exc, "error")
+                if isinstance(operation, dict) and operation.get("action") == "restore":
+                    system_event(db, "system", "backup_restore_failed", operation.get("token"), "error")
         finally:
             self.pending_maintenance.unlink(missing_ok=True)
             for preview in self.maintenance.glob("preview-*.sqlite3"):
@@ -1473,6 +1482,16 @@ def create_app(data=None, root=None, workers=True):
     def restore_backup():
         data = local_change()
         return prepare_system_change({"action": "restore", "token": data.get("token")})
+
+    @app.get("/api/system/backup/status/<token>")
+    def backup_restore_status(token):
+        archive.backup_candidate(token)
+        with archive.db() as db:
+            result = db.execute("""SELECT code FROM system_event WHERE area='system' AND detail=?
+                AND code IN ('backup_restored','backup_restore_failed') ORDER BY id DESC LIMIT 1""", (token,)).fetchone()
+        if result:
+            return jsonify(status="verified" if result["code"] == "backup_restored" else "failed")
+        return jsonify(status="pending" if archive.pending_maintenance.exists() else "unknown")
 
     @app.post("/api/system/reset")
     def reset_data():

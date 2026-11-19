@@ -124,8 +124,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.8.tar gridtube:0.7.8
-docker load -i gridtube-0.7.8.tar
+docker save -o gridtube-0.7.9.tar gridtube:0.7.9
+docker load -i gridtube-0.7.9.tar
 docker compose up -d --no-build --pull never
 ~~~
 
@@ -137,7 +137,9 @@ Em **Configurações → Sistema**, use **Atualizar yt-dlp** para consultar a ve
 
 ## Backup, restauração e limpeza
 
-Em **Configurações → Sistema**, exporte `gridtube-backup.jsonl` para levar os canais, playlists, catálogo, fila, progresso e preferências. Para migrar, copie a pasta do acervo para o novo host e confira a prévia do backup antes de restaurar. Vídeos com arquivos ausentes ficam em **Removidos** e podem ser restaurados depois de copiar os arquivos.
+Em **Configurações → Sistema**, exporte `gridtube-backup.jsonl` para levar os canais, playlists, catálogo, fila, progresso e preferências. **Restaurar backup** abre a seleção do arquivo. Depois de escolhido, o GridTube valida o backup, aplica os dados ao reiniciar e verifica a integridade do banco e os registros restaurados. A tela informa **Backup restaurado e verificado** quando a conferência termina.
+
+Para migrar, copie a pasta do acervo para o novo host antes de restaurar. Vídeos com arquivos ausentes ficam em **Removidos** e podem ser restaurados depois de copiar os arquivos.
 
 Em **Limpar dados do app**, digite `RESET` para apagar os dados do app e manter `library/`. Para apagar também os vídeos e os arquivos auxiliares dessa biblioteca, marque a caixa de exclusão no HD e digite `RESET MEDIA`. A restauração e a limpeza entram em vigor na reinicialização do serviço.
 

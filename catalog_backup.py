@@ -57,3 +57,12 @@ def replace_catalog(db, candidate=None):
         for table in TABLES:
             columns = ",".join(row[1] for row in db.execute(f"PRAGMA main.table_info({table})"))
             db.execute(f"INSERT INTO main.{table} ({columns}) SELECT {columns} FROM restored.{table}")
+
+
+def verify_restored_catalog(db):
+    if db.execute("PRAGMA main.quick_check").fetchone()[0] != "ok" or db.execute("PRAGMA main.foreign_key_check").fetchone():
+        raise ValueError("backup_verification_failed")
+    for table in TABLES:
+        if (db.execute(f"SELECT * FROM main.{table} EXCEPT SELECT * FROM restored.{table} LIMIT 1").fetchone()
+                or db.execute(f"SELECT * FROM restored.{table} EXCEPT SELECT * FROM main.{table} LIMIT 1").fetchone()):
+            raise ValueError("backup_verification_failed")

@@ -63,9 +63,11 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.8 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.9 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
+
+Na interface, **Restaurar backup** abre a seleção do arquivo e encadeia a validação, a restauração e a consulta do resultado. Antes do commit, a restauração compara todas as tabelas persistidas com o candidato validado e executa as verificações de integridade e chaves estrangeiras do SQLite. Após o commit, uma nova conexão repete a conferência. O resultado registra o token da operação e `GET /api/system/backup/status/{token}` permite confirmar a restauração correspondente após o reinício. Um resultado anterior de outra operação é ignorado.
 
 A biblioteca usa `GET /api/videos?summary=1` para carregar somente os dados dos cartões. `GET /api/videos` e a rota individual de faixas preservam os metadados completos. O catálogo dispensa comparações de texto ao listar sem filtro. Na interface, consultas de fundo são pausadas com a aba oculta e espaçadas quando a biblioteca ou o player estão sem atividade. A captura gera a miniatura com um único thread do FFmpeg.
 
