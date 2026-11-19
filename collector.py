@@ -491,18 +491,22 @@ def format_choice(formats, quality, language, mode, duration=None):
                                              not pair[0]["vcodec"].startswith(WEBM_VIDEO)))
 
 
-def ffmpeg(*args, progress=None):
+class DownloadCancelled(Exception):
+    pass
+
+
+def ffmpeg(*args, progress=None, cancel=None):
     executable = shutil.which("ffmpeg")
     if not executable:
         raise RuntimeError("FFmpeg is required")
     command = [executable, "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
     arguments = list(map(str, args))
-    if progress is None:
+    if progress is None and cancel is None:
         subprocess.run(command + arguments, check=True, capture_output=True, timeout=10800)
         return
 
     failures = []
-    command += ["-progress", "pipe:1", "-stats_period", "0.5"] + arguments
+    command += (["-progress", "pipe:1", "-stats_period", "0.5"] if progress else []) + arguments
     with tempfile.TemporaryFile() as errors, subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors) as process:
         def read_progress():
             for line in process.stdout:
@@ -513,20 +517,34 @@ def ffmpeg(*args, progress=None):
                     except Exception as exc:
                         failures.append(exc)
 
-        observer = threading.Thread(target=read_progress, name="ffmpeg-progress")
-        observer.start()
+        observer = threading.Thread(target=read_progress, name="ffmpeg-progress") if progress else None
+        if observer:
+            observer.start()
+        deadline = time.monotonic() + 10800
         try:
-            process.wait(timeout=10800)
+            while True:
+                if cancel:
+                    cancel()
+                if failures:
+                    raise failures[0]
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(command, 10800)
+                try:
+                    process.wait(timeout=0.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
-            observer.join()
+            if observer:
+                observer.join()
+        if failures:
+            raise failures[0]
         if process.returncode:
             errors.seek(0)
             raise subprocess.CalledProcessError(process.returncode, command, stderr=errors.read())
-        if failures:
-            raise failures[0]
 
 
 def media_duration(path):
@@ -547,7 +565,7 @@ def download_input(info, format_id, work, kind, update=None):
     return media_output(result, work, stem)
 
 
-def mux_video(source, target, language, audio_source=None, audio_codec="copy", progress=None):
+def mux_video(source, target, language, audio_source=None, audio_codec="copy", progress=None, cancel=None):
     common = ["-fflags", "+genpts", "-i", source]
     if audio_source:
         common += ["-fflags", "+genpts", "-i", audio_source]
@@ -559,7 +577,7 @@ def mux_video(source, target, language, audio_source=None, audio_codec="copy", p
         iso_code = {"pt": "por", "en": "eng"}[language]
         common += ["-metadata:s:a:0", f"language={iso_code}"]
     try:
-        ffmpeg(*common, "-c:v", "copy", "-c:a", audio_codec, target, progress=progress)
+        ffmpeg(*common, "-c:v", "copy", "-c:a", audio_codec, target, progress=progress, cancel=cancel)
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(f"FFmpeg: {exc.stderr.decode(errors='replace')[-650:]}") from exc
 
@@ -576,9 +594,15 @@ def transfer_progress(event):
     return None
 
 
-def download(url, prefs, work, bundle, progress, *, on_title):
+def download(url, prefs, work, bundle, progress, *, on_title, cancel=None):
+    def check_cancelled():
+        if cancel:
+            cancel()
+
+    check_cancelled()
     title_filter = prefs.get("title_filter", "")
     info = read_video(url, catalog_title=bool(title_filter))
+    check_cancelled()
     title = info.get("title") or info["id"]
     if title != info["id"]:
         on_title(title)
@@ -592,11 +616,14 @@ def download(url, prefs, work, bundle, progress, *, on_title):
 
     def transfer(fmt, stem, phase):
         def update(event):
+            check_cancelled()
             if values := transfer_progress(event):
                 progress(phase, *values)
 
         progress(phase)
+        check_cancelled()
         path = download_input(info, fmt["format_id"], work, stem, update)
+        check_cancelled()
         progress(phase, 100)
         return path
 
@@ -617,16 +644,17 @@ def download(url, prefs, work, bundle, progress, *, on_title):
     reported = audio.get("language")
     label = audio_label(audio_source or source, reported, prefs["audio"] != "original" and
                         bool(language_score(reported, prefs["audio"])))
-    mux_video(source, target, label["audio"], audio_source, progress=remuxed if expected else None)
+    mux_video(source, target, label["audio"], audio_source, progress=remuxed if expected else None, cancel=cancel)
     progress("mux", 100)
     progress("thumbnail")
     thumbnail = save_video_thumbnail(info["id"], bundle)
+    check_cancelled()
     thumbnail_source = "youtube" if thumbnail else "frame"
     if not thumbnail:
         fallback = bundle / f"{stem}-thumb.jpg"
         try:
             ffmpeg("-filter_threads", "1", "-threads", "1", "-ss", min(5, (info.get("duration") or 0) / 3),
-                   "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", fallback)
+                   "-i", target, "-frames:v", "1", "-vf", "scale=720:-2", "-threads", "1", fallback, cancel=cancel)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
         thumbnail = fallback.name if fallback.is_file() else None

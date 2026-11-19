@@ -52,6 +52,8 @@ O Compose recria o container quando a configuração ou a imagem muda. A bibliot
 
 Em **Downloads**, links avulsos exibem o título assim que o YouTube o disponibiliza. Enquanto o nome estiver indisponível, a fila exibe o identificador do vídeo. A porcentagem acompanha a fase atual. A transferência de vídeo e áudio usa os bytes baixados, e a montagem usa a posição processada que o FFmpeg informa. A interface marca estimativas e usa uma barra indeterminada quando a etapa não tem uma medida de progresso.
 
+Use **Cancelar** para tirar um item da fila ou interromper um download e sua montagem. O item em andamento mostra **Cancelando…** enquanto encerra o processo e limpa os temporários. Uma consulta de rede em curso pode precisar terminar antes do cancelamento ser concluído. Use **Remover tentativa** para limpar uma falha da lista. Você pode adicionar o vídeo novamente depois.
+
 Em **Organizar vídeo → Excluir vídeo**, escolha **Remover da biblioteca** para manter os arquivos e restaurar o vídeo depois em **Removidos**. **Excluir também do disco** apaga a pasta daquele vídeo e seus arquivos auxiliares. Para excluir no disco, o Docker precisa de acesso de escrita à montagem do acervo.
 
 ### Modo de download
@@ -122,8 +124,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.7.tar gridtube:0.7.7
-docker load -i gridtube-0.7.7.tar
+docker save -o gridtube-0.7.8.tar gridtube:0.7.8
+docker load -i gridtube-0.7.8.tar
 docker compose up -d --no-build --pull never
 ~~~
 

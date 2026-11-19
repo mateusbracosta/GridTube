@@ -46,6 +46,8 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 
 **Downloads** shows the title of a queued video as soon as it is available, with the video ID while the title is unavailable. Progress shows the current phase and its percentage. The app uses transferred bytes for video and audio downloads, and the processed media duration reported by FFmpeg when assembling a file. It labels estimates and uses an indeterminate bar when progress cannot be measured.
 
+Use **Cancel** to remove a queued item or interrupt a download and its muxing process. An active item shows **Cancelling…** until the process stops and its temporary files are cleared. An in-flight network request may need to finish first. **Remove attempt** clears a failed task from the list. You can add the video again later.
+
 In the player settings, use the trash button next to a selected extra track to delete its file from disk. The trash button next to a failed attempt clears the attempt. Video cards use the saved YouTube thumbnail when available and keep the watch position for the progress bar and playback resume.
 
 The player centers subtitles at the bottom. **Open on YouTube** is available on the watch page and in the video card's three-dot menu.

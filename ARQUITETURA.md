@@ -55,6 +55,7 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.
 - `archive/work` guarda arquivos de trabalho e variantes derivadas. O app retoma jobs que ficaram em execução após reiniciar. Na publicação e na movimentação, registra o destino pretendido no SQLite antes de renomear a pasta.
 - A recuperação valida a mídia e o manifesto antes de confirmar a publicação. Um destino incompleto é preservado e aparece como falha em Downloads quando a mídia original está ausente. Uma nova captura recebe um nome livre se a pasta planejada já existir. Uma falha operacional transitória do SQLite faz a fila revisar publicações pendentes e retomar os trabalhos em execução.
+- O cancelamento de captura usa o estado persistente `cancelling` e um sinal de interrupção consultado pelos hooks do yt-dlp e pelo processo FFmpeg. A publicação e o cancelamento são serializados pela trava de arquivos. Depois da interrupção, a limpeza apaga os temporários específicos e retira a tarefa da fila. Se a captura substituía mídia de um registro anterior, o vídeo volta para Removidos com progresso e playlists. Na inicialização, pedidos de cancelamento pendentes são concluídos. Uma falha de permissão fica visível na tarefa para repetir a limpeza.
 - Em servidores pequenos, `GRIDTUBE_PLAYBACK_CACHE_MIB` limita o cache de áudios alternativos. A poda ocorre ao gerar uma variante, mantendo a variante atual. Requisições parciais de variantes já existentes não percorrem o cache; a marca de uso de cada arquivo é atualizada no máximo uma vez por minuto.
 - Remover um vídeo muda seu estado para `removed`, preservando o bundle, as playlists e o progresso. A mídia deixa de ser servida pelo GridTube e pode ser restaurada em **Removidos**. Para exclusão física, o app valida o caminho específico do bundle, move a pasta para `archive/work/deleting`, limpa os caches de reprodução associados e remove o registro do banco após apagar a pasta. Se houver falha após a movimentação, a exclusão pode ser repetida em **Removidos**.
 - **Conferir arquivos do acervo** verifica os vídeos publicados sob demanda. Para um caminho ausente, procura candidatos por ID no nome da pasta e no manifesto nos canais existentes e em `Avulsos`. Um destino único atualiza o catálogo e o M3U. Se a mídia continuar ausente, o vídeo vai para **Removidos** com os mesmos vínculos. A conferência detecta mídia devolvida ao acervo e respeita remoções manuais do app. Bibliotecas montadas no Nextcloud devem expor somente `library/`; a conferência atualiza o catálogo sem mover ou excluir a mídia.
@@ -62,7 +63,7 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.7 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.8 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 
@@ -76,7 +77,7 @@ O painel **Sistema** consulta `GET /api/system`, que mostra as versões de `yt-d
 | --- | --- |
 | Estado e padrões | `GET /api/state`, `PUT /api/settings` |
 | Descoberta e organização | `GET/POST /api/scans`, `POST /api/scans/playlists`, `POST /api/channels`, `PUT /api/channels/{id}`, `POST /api/channels/{id}/profile`, `POST /api/channels/{id}/queue` |
-| Fila, biblioteca e posição | `POST /api/downloads`, `GET /api/videos`, `POST /api/videos/{id}/retry`, `/move` e `/progress` |
+| Fila, biblioteca e posição | `POST /api/downloads`, `DELETE /api/downloads/{id}`, `GET /api/videos`, `POST /api/videos/{id}/retry`, `/move` e `/progress` |
 | Playlists | `POST /api/playlists`, `PUT/DELETE /api/playlists/{id}/videos/{video_id}` |
 | Faixas | `GET/POST /api/videos/{id}/tracks`, `POST /api/videos/{id}/tracks/discover` |
 | Arquivos | `/branding/{id}/{asset}`, `/media/{id}/{asset}`, `/playback/{id}/{language}` |

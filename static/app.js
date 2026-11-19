@@ -151,6 +151,12 @@ const translations = {
   play: ["Reproduzir","Play"],
   retry: ["Tentar novamente","Retry"],
   queuedState: ["Na fila","Queued"],
+  cancelDownload: ["Cancelar","Cancel"],
+  removeDownload: ["Remover tentativa","Remove attempt"],
+  cancelling: ["Cancelando…","Cancelling…"],
+  download_cancelled: ["Download cancelado","Download cancelled"],
+  download_finished: ["Este vídeo já foi publicado. Use Organizar vídeo para removê-lo.","This video has already been saved. Use Organize video to remove it."],
+  cancel_cleanup_failed: ["Não foi possível limpar os temporários. Confira as permissões e remova a tentativa novamente.","Could not clear temporary files. Check permissions and remove the attempt again."],
   youtubeVideo: ["Vídeo do YouTube","YouTube video"],
   running: ["Baixando / processando","Downloading / processing"],
   failed: ["Falhou","Failed"],
@@ -429,7 +435,7 @@ function published(raw) {
 }
 function nav() {
   const item = (key,title,glyph) => btn("scope",title,glyph,!watchPath()&&scope===key?"active":"",key);
-  const pending = (state.counts.queued||0)+(state.counts.running||0);
+  const pending = (state.counts.queued||0)+(state.counts.running||0)+(state.counts.cancelling||0);
   const html = `<div class="nav">${item("",t("library"),"library")}${item("continue",t("resume"),"clock")}${item("inbox",t("inbox"),"inbox")}
     ${item("downloads",t("downloads")+(pending?` · ${pending}`:""),"download")}${state.counts.removed||scope==="removed"?item("removed",t("removed"),"inbox"):""}</div>
     <div class="nav-head">${t("channels")}${btn("localChannel",t("localChannel"),"plus","flat icon-only")}</div>
@@ -453,7 +459,7 @@ async function refresh() {
 }
 async function backgroundRefresh(force=false) {
   if (document.hidden || modal.open || watchPath() || backgroundRefreshPending) return;
-  const busy = state.counts.queued || state.counts.running;
+  const busy = state.counts.queued || state.counts.running || state.counts.cancelling;
   const delay = busy && scope==="downloads" ? 1900 : busy || scope==="downloads" ? 3500 : 15000;
   if (!force && performance.now()-lastRefresh<delay) return;
   backgroundRefreshPending = true;
@@ -513,7 +519,10 @@ function jobTitle(v) {
 function job(v) {
   return `<article class="job"><div><strong>${esc(jobTitle(v))}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
     ${v.state==="running"?jobProgress(v):""}
-    ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div>${v.state==="failed"?`<aside class="job-actions">${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}</aside>`:""}</article>`;
+    ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div><aside class="job-actions">
+      ${v.state==="failed"?`${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}`:""}
+      ${v.state!=="cancelling"?btn("cancelDownload",t(v.state==="failed"?"removeDownload":"cancelDownload"),"close","flat",v.id):""}
+    </aside></article>`;
 }
 function jobProgress(v) {
   const phases={prepare:"progressPrepare",video:"progressVideo",audio:"progressAudio",mux:"progressMux",
@@ -765,11 +774,12 @@ function editChannel(channel) {
   const auto = channel ? `${checked("auto",t("auto"),channel.auto)}<small>${t("autoNote")}</small>` : "";
   simple(channel?"edit":"localChannel",`${field("name",channel?.name,"required maxlength=100")}
     ${channel?field("channelUrl",channel.source,"type=url"):""}
-    ${field("titleFilter",channel?.title_filter,`maxlength="120" placeholder="${t("titleExample")}"`)}
+    ${channel?.source?field("titleFilter",channel.title_filter,`maxlength="120" placeholder="${t("titleExample")}"`):""}
     <label>${t("channelDescription")}<textarea name="description" maxlength="5000" rows="3">${esc(channel?.custom_description||"")}</textarea></label>
     <p class="note">${t("configNote")}</p>${prefs(channel?.overrides||{},true)}${auto}`,"save",async data=>{
     await api(channel?`/channels/${channel.id}`:"/channels",channel?"PUT":"POST",
-      {name:data.get("name"),overrides:readPrefs(data),auto:data.has("auto"),description:data.get("description"),title_filter:data.get("titleFilter"),
+      {name:data.get("name"),overrides:readPrefs(data),auto:data.has("auto"),description:data.get("description"),
+        title_filter:data.get("titleFilter") ?? channel?.title_filter ?? "",
         ...(channel?{source:data.get("channelUrl")}:{})}); await finish();
   });
 }
@@ -1397,6 +1407,19 @@ async function act(action,value) {
     case "restoreVideo": await api(`/videos/${value}/restore`,"POST",{});await refresh();break;
     case "editRetry": editRetry(item);break;
     case "retry": await api(`/videos/${value}/retry`,"POST");await refresh();break;
+    case "cancelDownload": {
+      const button = document.querySelector(`[data-action="cancelDownload"][data-value="${CSS.escape(value)}"]`);
+      if (button) button.disabled = true;
+      try {
+        const result = await api(`/downloads/${value}`,"DELETE",{});
+        flash(t(result.cancelling?"cancelling":"download_cancelled"));
+        await refresh();
+      } catch (error) {
+        await refresh();
+        throw error;
+      } finally { if (button) button.disabled = false; }
+      break;
+    }
     case "seek": get("player").currentTime=Number(value);break;
     case "close": modal.close();break;
   }

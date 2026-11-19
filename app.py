@@ -181,6 +181,7 @@ class Archive:
         for path in (self.data, self.library, self.work, self.branding, self.playback):
             path.mkdir(parents=True, exist_ok=True)
         self.changed = threading.Event()
+        self.capture_cancelled = threading.Event()
         self.catalog = ThreadPoolExecutor(max_workers=1, thread_name_prefix="catalog")
         self.playlist_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="playlist-scan")
         self.origins = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-origin")
@@ -354,7 +355,7 @@ class Archive:
     def validate_backup_video(self, row):
         if collector.youtube_url(row["url"], "video")[1] != row["id"]:
             raise ValueError("backup_invalid")
-        if row["state"] not in {"ready", "removed", "queued", "running", "failed"}:
+        if row["state"] not in {"ready", "removed", "queued", "running", "failed", "cancelling"}:
             raise ValueError("backup_invalid")
         prefs = json.loads(row["prefs"])
         rule = checked_rule(prefs.pop("title_filter", ""))
@@ -366,6 +367,8 @@ class Archive:
         row["pending_folder"] = row["pending_channel"] = None
         if row["state"] == "running":
             row.update(state="queued", percent=0, progress_phase=None, progress_estimated=0)
+        if row["state"] == "cancelling":
+            row.update(state="failed", error="download_cancelled", progress_phase=None, progress_estimated=0)
         if row["state"] in {"ready", "removed"}:
             bundle = self.video_bundle(row)
             meta = json.loads(row["metadata"])
@@ -929,6 +932,8 @@ class Archive:
             return False
 
     def recover_downloads(self, db):
+        for row in db.execute("SELECT * FROM video WHERE state='cancelling'").fetchall():
+            self.finish_cancellation(db, row)
         pending = db.execute("SELECT * FROM video WHERE pending_folder IS NOT NULL").fetchall()
         for row in pending:
             self.recover_publication(db, row)
@@ -937,12 +942,72 @@ class Archive:
         db.execute("UPDATE track_job SET state='queued' WHERE state='running'")
         return [row["id"] for row in pending]
 
+    def check_capture_cancelled(self):
+        if self.capture_cancelled.is_set():
+            raise collector.DownloadCancelled()
+
+    def finish_cancellation(self, db, row):
+        inputs = self.work / "inputs" / row["id"]
+        try:
+            if not collector.VIDEO_ID.fullmatch(row["id"]) or inputs.resolve() != inputs:
+                raise ValueError("delete_invalid_folder")
+            for temporary in [inputs, *self.work.glob(f"{row['id']}-*")]:
+                if temporary.resolve() != temporary:
+                    raise ValueError("delete_invalid_folder")
+                if temporary.exists():
+                    shutil.rmtree(temporary)
+        except (OSError, ValueError) as exc:
+            db.execute("""UPDATE video SET state='failed',error='cancel_cleanup_failed',
+                progress_phase=NULL,progress_estimated=0 WHERE id=?""", (row["id"],))
+            system_event(db, "downloads", "cancel_cleanup_failed", f"{row['id']} · {exc}", "error")
+            return False
+        if row["folder"]:
+            missing = not self.archived_picture_exists(row)
+            db.execute("""UPDATE video SET state='removed',error=?,percent=0,
+                pending_folder=NULL,pending_channel=NULL,progress_phase=NULL,progress_estimated=0 WHERE id=?""",
+                       ("external_media_missing" if missing else None, row["id"]))
+        else:
+            if row["channel_id"]:
+                db.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (row["channel_id"], row["id"]))
+            db.execute("DELETE FROM video WHERE id=?", (row["id"],))
+        system_event(db, "downloads", "download_cancelled", row["title"])
+        return True
+
+    def cancel_download(self, video_id):
+        if not collector.VIDEO_ID.fullmatch(video_id):
+            abort(404)
+        cleanup_failed = False
+        with self.files_lock, self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+            if row is None:
+                return False
+            if row["state"] == "cancelling":
+                return True
+            if row["state"] not in {"queued", "running", "failed"}:
+                raise ValueError("download_finished")
+            if row["pending_folder"]:
+                self.recover_publication(db, row)
+                row = db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+                if row["state"] == "ready":
+                    return False
+            if row["state"] == "running":
+                db.execute("UPDATE video SET state='cancelling' WHERE id=?", (video_id,))
+                self.capture_cancelled.set()
+                return True
+            cleanup_failed = not self.finish_cancellation(db, row)
+        self.changed.set()
+        if cleanup_failed:
+            raise ValueError("cancel_cleanup_failed")
+        return False
+
     def capture(self, item):
         video_id = item["id"]
         last_progress, last_write = (None, None, False), float("-inf")
 
         def progress(phase, percent=None, estimated=False):
             nonlocal last_progress, last_write
+            self.check_capture_cancelled()
             current = (phase, percent, estimated)
             if current == last_progress:
                 return
@@ -960,10 +1025,12 @@ class Archive:
             bundle.mkdir()
             progress("prepare")
             meta = collector.download(item["url"], json.loads(item["prefs"]), inputs, bundle, progress,
-                                      on_title=lambda title: self.remember_download_title(video_id, title))
+                                      on_title=lambda title: self.remember_download_title(video_id, title),
+                                      cancel=self.check_capture_cancelled)
             progress("publish")
             collector.write_manifest(bundle, meta)
             with self.files_lock:
+                self.check_capture_cancelled()
                 with self.db() as db:
                     channel = self.channel(db, item["channel_id"])
                     parent = Path(channel["folder"] if channel else "Avulsos")
@@ -1030,11 +1097,13 @@ class Archive:
                                    (error, retry_at, track["job_id"]))
                         system_event(db, "tracks", error, f"{track['video_id']} · {track['code']}", "error")
                 continue
-            with self.db() as db:
-                item = db.execute("""UPDATE video SET state='running',progress_phase='prepare',percent=NULL,
-                    progress_estimated=0 WHERE id=(
-                    SELECT id FROM video WHERE state='queued' ORDER BY created,rowid LIMIT 1
-                ) RETURNING *""").fetchone()
+            with self.files_lock:
+                self.capture_cancelled.clear()
+                with self.db() as db:
+                    item = db.execute("""UPDATE video SET state='running',progress_phase='prepare',percent=NULL,
+                        progress_estimated=0 WHERE id=(
+                        SELECT id FROM video WHERE state='queued' ORDER BY created,rowid LIMIT 1
+                    ) RETURNING *""").fetchone()
             if item is None:
                 self.changed.wait(2)
                 continue
@@ -1043,11 +1112,13 @@ class Archive:
             except sqlite3.OperationalError:
                 raise
             except Exception as exc:
-                logging.exception("Capture failed for %s", item["id"])
                 with self.files_lock:
                     with self.db() as db:
                         row = db.execute("SELECT * FROM video WHERE id=?", (item["id"],)).fetchone()
-                        if not row["pending_folder"] or self.recover_publication(db, row) is None:
+                        if row["state"] == "cancelling":
+                            self.finish_cancellation(db, row)
+                        elif not row["pending_folder"] or self.recover_publication(db, row) is None:
+                            logging.exception("Capture failed for %s", item["id"])
                             db.execute("""UPDATE video SET state='failed',error=?,
                                           pending_folder=NULL,pending_channel=NULL WHERE id=?""",
                                        (str(exc)[-450:], item["id"]))
@@ -1658,13 +1729,18 @@ def create_app(data=None, root=None, workers=True):
             archive.titles.submit(archive.lookup_download_title, video_id)
         return jsonify(id=video_id, queued=queued)
 
+    @app.delete("/api/downloads/<video_id>")
+    def cancel_download(video_id):
+        local_change()
+        return jsonify(cancelling=archive.cancel_download(video_id))
+
     @app.get("/api/videos")
     def videos():
         state = request.args.get("state", "ready")
         scope = request.args.get("scope", "")
         term = request.args.get("q", "").strip()
         summary = request.args.get("summary") == "1"
-        states = {"jobs": ("queued", "running", "failed"), "removed": ("removed",)}.get(state, ("ready",))
+        states = {"jobs": ("queued", "running", "failed", "cancelling"), "removed": ("removed",)}.get(state, ("ready",))
         params = list(states)
         where = f"state IN ({','.join('?' for _ in states)})"
         if term:

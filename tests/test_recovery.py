@@ -43,7 +43,7 @@ class RecoveryTests(unittest.TestCase):
         with self.archive.db() as db:
             item = dict(db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone())
 
-        def download(url, prefs, work, bundle, progress, *, on_title):
+        def download(url, prefs, work, bundle, progress, *, on_title, cancel=None):
             on_title("Fixture")
             (bundle / "Fixture.mp4").write_bytes(b"retry")
             return {"title": "Fixture", "filename": "Fixture.mp4"}
