@@ -1297,7 +1297,7 @@ function watch(item, initialJobs=[], autoplay=false) {
     flash(t("playbackError"));
     saved.querySelector("[name=watchAudio]").value = "";
     saved.querySelector('[data-remove-track][data-kind="audio"]').hidden = true;
-    changeAudio("",requestedTime,resume);
+    changeAudio("");
   };
   player.ontimeupdate = ()=>{if(Math.abs(player.currentTime-last)>=10) update(player.currentTime);};
   player.onseeked = ()=>update(player.currentTime);

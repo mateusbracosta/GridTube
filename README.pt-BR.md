@@ -138,8 +138,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.11.tar gridtube:0.7.15
-docker load -i gridtube-0.7.11.tar
+docker save -o gridtube-image.tar gridtube:0.7.16
+docker load -i gridtube-image.tar
 docker compose up -d --no-build --pull never
 ~~~
 

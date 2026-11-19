@@ -203,6 +203,10 @@ def system_event(db, area, code, detail=None, severity="info"):
     db.execute("DELETE FROM system_event WHERE id <= (SELECT max(id)-100 FROM system_event)")
 
 
+class ArchiveConnection(sqlite3.Connection):
+    """A connection carrying file snapshots for its metadata transaction."""
+
+
 class Archive:
     def __init__(self, data, root):
         self.data = Path(data).resolve()
@@ -266,7 +270,8 @@ class Archive:
 
     @contextmanager
     def db(self):
-        db = sqlite3.connect(self.data / "library.sqlite", timeout=15)
+        db = sqlite3.connect(self.data / "library.sqlite", timeout=15, factory=ArchiveConnection)
+        db.manifest_snapshots = {}
         db.row_factory = sqlite3.Row
         db.create_function("fold", 1, str.casefold, deterministic=True)
         db.create_function("title_key", 1, collector.title_key, deterministic=True)
@@ -274,7 +279,15 @@ class Archive:
         try:
             with db:
                 yield db
+        except BaseException:
+            for bundle, previous in reversed(db.manifest_snapshots.items()):
+                try:
+                    self.restore_manifest_snapshot(bundle, previous)
+                except OSError:
+                    logging.exception("Could not restore a video manifest after a database rollback")
+            raise
         finally:
+            db.manifest_snapshots.clear()
             db.close()
 
     def defaults(self, db):
@@ -671,13 +684,22 @@ class Archive:
             old = db.execute("SELECT profile FROM channel_profile WHERE source=?", (source,)).fetchone()
         previous = json.loads(old["profile"]) if old else {}
         profile = dict(profile)
+        updated_images = {}
         for name in ("avatar", "banner"):
+            remote = profile.get(name)
+            cached = previous.get(name)
+            if (remote and previous.get("image_sources", {}).get(name) == remote and cached
+                    and self.playlist_asset(directory, cached).is_file()):
+                profile[name] = cached
+                continue
             try:
-                filename = collector.save_channel_image(profile[name], directory, name) if profile.get(name) else None
+                filename = collector.save_channel_image(remote, directory, name) if remote else None
             except Exception:
                 logging.warning("Could not cache channel %s for %s", name, source)
-                filename = previous.get(name)
-            profile[name] = filename or previous.get(name)
+                filename = None
+            if filename:
+                updated_images[name] = remote
+            profile[name] = filename or cached
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute("SELECT profile FROM channel_profile WHERE source=?", (source,)).fetchone()
@@ -691,6 +713,7 @@ class Archive:
             for name in ("avatar", "banner"):
                 common[name] = profile.get(name) or latest.get(name)
             common["localizations"] = variants
+            common["image_sources"] = {**latest.get("image_sources", {}), **updated_images}
             db.execute("""INSERT INTO channel_profile VALUES (?,?,?) ON CONFLICT(source) DO UPDATE
                           SET profile=excluded.profile, asset_key=excluded.asset_key""",
                        (source, encode(common), key))
@@ -811,9 +834,44 @@ class Archive:
         return row
 
     def save_video_metadata(self, db, row, metadata):
-        collector.write_manifest(self.library / row["folder"], metadata)
-        db.execute("UPDATE video SET metadata=?,title=? WHERE id=?",
-                   (encode(metadata), metadata["title"], row["id"]))
+        bundle = self.library / row["folder"]
+        previous = self.manifest_snapshot(bundle)
+        snapshots = getattr(db, "manifest_snapshots", None)
+        if snapshots is not None:
+            snapshots.setdefault(bundle, previous)
+        collector.write_manifest(bundle, metadata)
+        try:
+            db.execute("UPDATE video SET metadata=?,title=? WHERE id=?",
+                       (encode(metadata), metadata["title"], row["id"]))
+        except Exception:
+            try:
+                self.restore_manifest_snapshot(bundle, previous)
+            except OSError:
+                logging.exception("Could not restore the previous video manifest")
+            raise
+
+    @staticmethod
+    def manifest_snapshot(bundle):
+        try:
+            return (bundle / "video.json").read_bytes()
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def restore_manifest_snapshot(bundle, previous):
+        manifest = bundle / "video.json"
+        if previous is None:
+            manifest.unlink(missing_ok=True)
+            return
+        with tempfile.NamedTemporaryFile(dir=bundle, prefix="restore-manifest-", delete=False) as temp:
+            staged = Path(temp.name)
+            try:
+                temp.write(previous)
+                temp.close()
+                staged.replace(manifest)
+            finally:
+                temp.close()
+                staged.unlink(missing_ok=True)
 
     def queue_default_subtitles(self, db, row):
         prefs = json.loads(row["prefs"])
@@ -871,6 +929,7 @@ class Archive:
                                for job in active):
                             raise ValueError("track_active")
                         bundle = self.video_bundle(row)
+                        original_manifest = self.manifest_snapshot(bundle)
                         source = self.playlist_asset(bundle, filename)
                         if (filename in {metadata["filename"], metadata.get("thumbnail")}
                                 or source.suffix != (".m4a" if kind == "audio" else ".vtt")):
@@ -892,7 +951,7 @@ class Archive:
                     if staged.exists():
                         staged.rename(source)
                     if manifest_changed:
-                        collector.write_manifest(bundle, json.loads(row["metadata"]))
+                        self.restore_manifest_snapshot(bundle, original_manifest)
                     raise
             return True
 
@@ -2111,7 +2170,7 @@ def create_app(data=None, root=None, workers=True):
             raise ValueError("invalid_track")
         try:
             return jsonify(removed=archive.remove_track(video_id, kind, code, saved))
-        except OSError:
+        except (OSError, sqlite3.Error):
             logging.exception("Could not delete an audio or subtitle track")
             return jsonify(error="track_delete_failed"), 409
 

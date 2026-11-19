@@ -111,6 +111,30 @@ class ProfileLocaleTests(unittest.TestCase):
             response = self.client.post(url, json={}, headers={"Origin": "https://other.example"})
             self.assertEqual(response.status_code, 403)
 
+    def test_unchanged_profile_images_are_reused_but_changed_or_missing_files_are_fetched(self):
+        profile = {"name": "Creator", "description": "Bio", "avatar": "https://yt3.ggpht.com/avatar",
+                   "banner": "https://yt3.ggpht.com/banner"}
+
+        def save_image(url, directory, name):
+            filename = name + ".jpg"
+            (directory / filename).write_bytes(url.encode())
+            return filename
+
+        with patch("collector.save_channel_image", side_effect=save_image) as download:
+            self.archive.save_profile(self.source, profile, "pt-BR")
+            self.assertEqual(download.call_count, 2)
+            self.archive.save_profile(self.source, profile, "en-US")
+            self.assertEqual(download.call_count, 2)
+            changed = {**profile, "avatar": "https://yt3.ggpht.com/new-avatar"}
+            self.archive.save_profile(self.source, changed, "pt-BR")
+            self.assertEqual(download.call_count, 3)
+            with self.archive.db() as db:
+                key = db.execute("SELECT asset_key FROM channel_profile WHERE source=?", (self.source,)).fetchone()[0]
+            (self.archive.branding / key / "banner.jpg").unlink()
+            self.archive.save_profile(self.source, changed, "en-US")
+            self.assertEqual(download.call_count, 4)
+            self.assertEqual(self.description("pt-BR")["avatar"], "avatar.jpg")
+
 
 if __name__ == "__main__":
     unittest.main()

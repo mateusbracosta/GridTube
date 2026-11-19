@@ -1,6 +1,8 @@
 import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -144,6 +146,116 @@ class LibraryCheckTests(unittest.TestCase):
         self.assertEqual(response.json["error"], "track_delete_failed")
         self.assertTrue(self.subtitle.is_file())
         self.assertEqual(self.client.get(self.url + "/tracks").json["video"]["subtitles"], {"en": self.subtitle.name})
+
+    def test_sql_failure_after_manifest_write_restores_exact_previous_manifest(self):
+        manifest = self.folder / "video.json"
+        original_manifest = b" \n" + json.dumps(
+            {**json.loads(manifest.read_bytes()), "local_note": "preserve this field"}, indent=3).encode() + b"\r\n"
+        manifest.write_bytes(original_manifest)
+        original_save = self.archive.save_video_metadata
+        case = self
+
+        def failed_update(db, row, metadata):
+            class FailureDB:
+                def execute(self, sql, *args):
+                    if sql.startswith("UPDATE video SET metadata="):
+                        case.assertNotIn("en", json.loads(manifest.read_bytes())["subtitles"])
+                        raise sqlite3.OperationalError("disk I/O error")
+                    return db.execute(sql, *args)
+
+            return original_save(FailureDB(), row, metadata)
+
+        with patch.object(self.archive, "save_video_metadata", side_effect=failed_update), self.assertLogs(level="ERROR"):
+            response = self.client.delete(self.url + "/tracks/subtitle/en", json={"saved": True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json["error"], "track_delete_failed")
+        self.assertTrue(self.subtitle.is_file())
+        self.assertEqual(manifest.read_bytes(), original_manifest)
+        self.assertEqual(self.client.get(self.url + "/tracks").json["video"]["subtitles"], {"en": self.subtitle.name})
+        self.assertTrue(self.client.delete(self.url + "/tracks/subtitle/en", json={"saved": True}).json["removed"])
+
+    def test_commit_failure_restores_file_database_and_exact_manifest(self):
+        manifest = self.folder / "video.json"
+        original_manifest = json.dumps(json.loads(manifest.read_bytes()), indent=5).encode() + b"\n\n"
+        manifest.write_bytes(original_manifest)
+        original_db = self.archive.db
+
+        @contextmanager
+        def failed_commit():
+            with original_db() as db:
+                yield db
+                self.assertNotIn("en", json.loads(manifest.read_bytes())["subtitles"])
+                raise sqlite3.OperationalError("disk I/O error during commit")
+
+        with patch.object(self.archive, "db", side_effect=failed_commit), self.assertLogs(level="ERROR"):
+            response = self.client.delete(self.url + "/tracks/subtitle/en", json={"saved": True})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json["error"], "track_delete_failed")
+        self.assertTrue(self.subtitle.is_file())
+        self.assertEqual(manifest.read_bytes(), original_manifest)
+        self.assertEqual(self.client.get(self.url + "/tracks").json["video"]["subtitles"], {"en": self.subtitle.name})
+
+    def test_downloaded_track_commit_failure_keeps_original_catalog_and_manifest(self):
+        manifest = self.folder / "video.json"
+        original_manifest = manifest.read_bytes()
+        original_db = self.archive.db
+        with original_db() as db:
+            db.execute("""INSERT INTO track_job(video_id,kind,code,allow_auto,exact,state)
+                VALUES (?,'subtitle','pt-BR',1,1,'running')""", (self.video_id,))
+            job = dict(db.execute("SELECT rowid AS job_id,* FROM track_job").fetchone())
+
+        @contextmanager
+        def failed_commit():
+            with original_db() as db:
+                yield db
+                if db.manifest_snapshots:
+                    self.assertIn("pt-BR", json.loads(manifest.read_bytes())["subtitles"])
+                    raise sqlite3.OperationalError("disk I/O error during commit")
+
+        def fetch(url, kind, code, work, *args):
+            source = work / "track.vtt"
+            source.write_bytes(b"WEBVTT\n\n")
+            return "pt-BR", source
+
+        with patch.object(self.archive, "db", side_effect=failed_commit), \
+                patch.object(collector, "fetch_track", side_effect=fetch):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "during commit"):
+                self.archive.fetch_queued_track(job)
+        self.assertEqual(manifest.read_bytes(), original_manifest)
+        with original_db() as db:
+            metadata = json.loads(db.execute("SELECT metadata FROM video WHERE id=?", (self.video_id,)).fetchone()[0])
+            self.assertEqual(metadata["subtitles"], {"en": self.subtitle.name})
+            self.assertEqual(db.execute("SELECT state FROM track_job").fetchone()[0], "running")
+        self.assertEqual(self.subtitle.read_bytes(), b"WEBVTT")
+        self.assertEqual(self.picture.read_bytes(), b"fixture media")
+        with patch.object(collector, "fetch_track", side_effect=fetch):
+            self.archive.fetch_queued_track(job)
+        self.assertIn("pt-BR", self.client.get(self.url + "/tracks").json["video"]["subtitles"])
+
+    def test_transaction_rollback_keeps_first_snapshot_and_original_exception(self):
+        manifest = self.folder / "video.json"
+        before = manifest.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "transaction failed"):
+            with self.archive.db() as db:
+                row = self.archive.ready_video(db, self.video_id)
+                metadata = json.loads(row["metadata"])
+                metadata["description"] = "first"
+                self.archive.save_video_metadata(db, row, metadata)
+                metadata["description"] = "second"
+                self.archive.save_video_metadata(db, row, metadata)
+                self.assertEqual(db.manifest_snapshots[self.folder], before)
+                raise RuntimeError("transaction failed")
+        self.assertEqual(manifest.read_bytes(), before)
+
+        with patch.object(self.archive, "restore_manifest_snapshot", side_effect=OSError("read-only disk")), \
+                self.assertLogs(level="ERROR"):
+            with self.assertRaisesRegex(RuntimeError, "original failure"):
+                with self.archive.db() as db:
+                    row = self.archive.ready_video(db, self.video_id)
+                    metadata = json.loads(row["metadata"])
+                    metadata["description"] = "cannot restore"
+                    self.archive.save_video_metadata(db, row, metadata)
+                    raise RuntimeError("original failure")
 
     def test_original_thumbnail_replaces_frame_and_is_stable_after_progress(self):
         fallback = self.folder / "Fixture-thumb.jpg"
