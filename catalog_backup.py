@@ -4,7 +4,9 @@ from contextlib import closing
 
 
 FORMAT = {"format": "gridtube-catalog", "version": 1}
-TABLES = ("settings", "channel", "channel_description", "playlist", "video", "playlist_item", "seen", "track_job")
+STYLE_TABLES = {"channel_style", "playlist_style"}
+TABLES = ("settings", "channel", "channel_description", "playlist", "channel_style", "playlist_style",
+          "video", "playlist_item", "seen", "track_job")
 CACHE_TABLES = ("playlist_entry", "source_playlist", "entry", "scan", "channel_profile", "system_event")
 LINE_LIMIT = 1024 * 1024
 
@@ -35,6 +37,9 @@ def load_backup(upload, target, schema, validate):
             if record == {"end": True}:
                 if upload.read(1) or db.execute("SELECT count(*) FROM settings").fetchone()[0] != 1:
                     raise ValueError("backup_invalid")
+                if db.execute("""SELECT 1 FROM channel_style s JOIN channel c ON s.id=c.id
+                    WHERE c.source IS NOT NULL LIMIT 1""").fetchone():
+                    raise ValueError("backup_invalid")
                 return counts
             table, row = record["table"], record["row"]
             if table not in columns or not isinstance(row, dict) or set(row) != set(columns[table]):
@@ -54,7 +59,10 @@ def replace_catalog(db, candidate=None):
     for table in (*CACHE_TABLES, *reversed(TABLES)):
         db.execute(f"DELETE FROM {table}")
     if candidate is not None:
+        available = {row[0] for row in db.execute("SELECT name FROM restored.sqlite_master WHERE type='table'")}
         for table in TABLES:
+            if table in STYLE_TABLES and table not in available:
+                continue
             columns = ",".join(row[1] for row in db.execute(f"PRAGMA main.table_info({table})"))
             db.execute(f"INSERT INTO main.{table} ({columns}) SELECT {columns} FROM restored.{table}")
 
@@ -62,7 +70,12 @@ def replace_catalog(db, candidate=None):
 def verify_restored_catalog(db):
     if db.execute("PRAGMA main.quick_check").fetchone()[0] != "ok" or db.execute("PRAGMA main.foreign_key_check").fetchone():
         raise ValueError("backup_verification_failed")
+    available = {row[0] for row in db.execute("SELECT name FROM restored.sqlite_master WHERE type='table'")}
     for table in TABLES:
+        if table in STYLE_TABLES and table not in available:
+            if db.execute(f"SELECT 1 FROM main.{table} LIMIT 1").fetchone():
+                raise ValueError("backup_verification_failed")
+            continue
         if (db.execute(f"SELECT * FROM main.{table} EXCEPT SELECT * FROM restored.{table} LIMIT 1").fetchone()
                 or db.execute(f"SELECT * FROM restored.{table} EXCEPT SELECT * FROM main.{table} LIMIT 1").fetchone()):
             raise ValueError("backup_verification_failed")

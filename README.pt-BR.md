@@ -50,6 +50,8 @@ O Compose recria o container quando a configuração ou a imagem muda. A bibliot
 - **Baixar por link** pode guardar em um canal ou em **Avulsos**. Em **Opções para este vídeo**, escolha modo de download, limite de resolução no modo compacto, áudio e legendas. Os campos deixados em **Usar padrão** herdam as preferências do canal ou os padrões globais. Em **Downloads**, use **Editar opções e tentar novamente** para ajustar uma tentativa que falhou. **Tentar novamente** reutiliza as escolhas individuais já feitas. Abra o menu de organização de um vídeo para mover a pasta para outro canal, criar um canal local e já mover o vídeo, ou criar/adicionar a uma playlist. Uma playlist aponta para o vídeo da biblioteca, com uma única cópia física.
 - **PT-BR / EN** alterna o idioma da interface naquele navegador. O player local oferece legendas, capítulos quando disponíveis e retomada de posição.
 
+Em canais locais, escolha **Ícone e cor** ao criar ou editar. Nas playlists criadas no app, use **Personalizar** no cabeçalho. As escolhas aparecem na barra lateral e nos cabeçalhos e são incluídas no backup do catálogo.
+
 Em **Downloads**, links avulsos exibem o título assim que o YouTube o disponibiliza. Enquanto o nome estiver indisponível, a fila exibe o identificador do vídeo. A porcentagem acompanha a fase atual. A transferência de vídeo e áudio usa os bytes baixados, e a montagem usa a posição processada que o FFmpeg informa. A interface marca estimativas e usa uma barra indeterminada quando a etapa não tem uma medida de progresso.
 
 Use **Cancelar** para tirar um item da fila ou interromper um download e sua montagem. O item em andamento mostra **Cancelando…** enquanto encerra o processo e limpa os temporários. Uma consulta de rede em curso pode precisar terminar antes do cancelamento ser concluído. Use **Remover tentativa** para limpar uma falha da lista. Você pode adicionar o vídeo novamente depois.
@@ -124,8 +126,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.9.tar gridtube:0.7.9
-docker load -i gridtube-0.7.9.tar
+docker save -o gridtube-0.7.10.tar gridtube:0.7.10
+docker load -i gridtube-0.7.10.tar
 docker compose up -d --no-build --pull never
 ~~~
 

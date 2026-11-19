@@ -1,4 +1,6 @@
 import io
+import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +78,67 @@ class BackupRestoreTests(unittest.TestCase):
         restored = self.open_app().test_client()
         self.assertEqual(restored.get(f"/api/system/backup/status/{token}").json["status"], "verified")
         self.assertEqual(restored.get("/api/system/backup/status/" + "f" * 32).json["status"], "unknown")
+
+    def test_local_channel_and_playlist_appearance_survive_backup_restore(self):
+        style = {"icon": "book", "color": "#78a8e5"}
+        channel = self.client.post("/api/channels", json={"name": "Knowledge", "appearance": style}).json["id"]
+        response = self.client.put(f"/api/playlists/{self.playlist}/appearance",
+                                   json={"appearance": {"icon": "gamepad", "color": "#85b98a"}})
+        self.assertEqual(response.status_code, 200)
+        with self.archive.db() as db:
+            folder = self.archive.channel(db, channel)["folder"]
+        response = self.client.put(f"/api/channels/{channel}",
+                                   json={"name": "Knowledge", "appearance": {"icon": "compass", "color": "#e0b565"}})
+        self.assertEqual(response.status_code, 200)
+        with self.client.get("/api/system/backup") as response:
+            self.backup = response.data
+        self.prepare_restore()
+        restored = self.open_app()
+        state = restored.test_client().get("/api/state").json
+        self.assertEqual(state["channels"][0]["appearance"], {"icon": "compass", "color": "#e0b565"})
+        self.assertEqual(state["playlists"][0]["appearance"], {"icon": "gamepad", "color": "#85b98a"})
+        with restored.extensions["archive"].db() as db:
+            self.assertEqual(db.execute("SELECT folder FROM channel WHERE id=?", (channel,)).fetchone()[0], folder)
+
+    def test_old_backup_and_pending_database_restore_without_style_tables(self):
+        rows = [json.loads(line) for line in self.backup.splitlines()]
+        self.backup = b"".join((json.dumps(row)+"\n").encode() for row in rows
+                               if row.get("table") not in catalog_backup.STYLE_TABLES)
+        token = self.prepare_restore()
+        with sqlite3.connect(self.archive.backup_candidate(token)) as db:
+            db.execute("DROP TABLE channel_style")
+            db.execute("DROP TABLE playlist_style")
+        self.client.put(f"/api/playlists/{self.playlist}/appearance",
+                        json={"appearance": {"icon": "music", "color": "#67c8bc"}})
+        restored = self.open_app().test_client()
+        self.assertEqual(restored.get(f"/api/system/backup/status/{token}").json["status"], "verified")
+        self.assertEqual(restored.get("/api/state").json["playlists"][0]["appearance"],
+                         {"icon": "list", "color": "#bebebe"})
+
+    def test_remote_channels_use_their_source_identity(self):
+        source = "https://www.youtube.com/@creator"
+        style = {"icon": "star", "color": "#e0b565"}
+        response = self.client.post("/api/channels", json={"name": "Creator", "source": source, "appearance": style})
+        self.assertEqual(response.status_code, 201)
+        channel = response.json["id"]
+        self.client.put(f"/api/channels/{channel}", json={"name": "Creator", "appearance": style})
+        self.assertIsNone(self.client.get("/api/state").json["channels"][0]["appearance"])
+        with self.archive.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM channel_style").fetchone()[0], 0)
+        local = self.client.post("/api/channels", json={"name": "Local", "appearance": style}).json["id"]
+        with patch.object(self.archive.catalog, "submit"):
+            self.client.put(f"/api/channels/{local}",
+                            json={"name": "Linked", "source": "https://www.youtube.com/@other", "appearance": style})
+        with self.archive.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM channel_style").fetchone()[0], 0)
+
+    def test_invalid_collection_appearance_is_rejected(self):
+        for style in ({"icon": ["book"], "color": "#78a8e5"},
+                      {"icon": "unknown", "color": "#78a8e5"},
+                      {"icon": "book", "color": "red;display:none"}):
+            response = self.client.put(f"/api/playlists/{self.playlist}/appearance", json={"appearance": style})
+            self.assertEqual(response.json["error"], "invalid_appearance")
+        self.assertEqual(self.client.get("/api/state").json["playlists"][0]["appearance"]["icon"], "list")
 
 
 if __name__ == "__main__":

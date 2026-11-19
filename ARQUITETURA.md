@@ -52,6 +52,7 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 - `archive/library` é a biblioteca exportável. Cada pasta de vídeo inclui o MP4 ou WebM, eventuais M4As e VTTs, miniatura e `video.json`. Mover um vídeo para outro canal move o bundle. Playlists referenciam o mesmo vídeo.
 - `archive/Playlists/<nome> [ID]/playlist.m3u8` reflete a ordem de exibição do app e referencia `library/` por caminho relativo. O ZIP de uma playlist transmite os arquivos em blocos com ZIP64 e `ZIP_STORED`. Mover ou excluir do disco um vídeo incluído aguarda o fim da transmissão para proteger o arquivo em curso.
 - `data/library.sqlite` guarda canais, catálogo de origem, fila, associações e progresso. O WAL exige cópia consistente do banco. Pare o serviço antes de copiar os diretórios para backup, ou use a API de backup do SQLite para um snapshot só do banco.
+- `channel_style` e `playlist_style` guardam o ícone e a cor das coleções locais. A interface usa a personalização para canais sem origem e playlists do app. As tabelas acompanham o backup e são opcionais ao restaurar candidatos de versões anteriores. A personalização preserva o caminho das pastas.
 - `data/branding` guarda as imagens locais dos canais. Copiar só a mídia não leva perfis, playlists, progresso ou fila.
 - `archive/work` guarda arquivos de trabalho e variantes derivadas. O app retoma jobs que ficaram em execução após reiniciar. Na publicação e na movimentação, registra o destino pretendido no SQLite antes de renomear a pasta.
 - A recuperação valida a mídia e o manifesto antes de confirmar a publicação. Um destino incompleto é preservado e aparece como falha em Downloads quando a mídia original está ausente. Uma nova captura recebe um nome livre se a pasta planejada já existir. Uma falha operacional transitória do SQLite faz a fila revisar publicações pendentes e retomar os trabalhos em execução.
@@ -63,7 +64,7 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.9 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.10 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 

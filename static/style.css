@@ -109,6 +109,21 @@ textarea{font:inherit;color:var(--text);background:#151515;border:1px solid var(
 .channel-avatar.placeholder svg{width:14px;height:14px;color:#bebebe}
 .channel-avatar.large{width:clamp(62px,10vw,114px);height:clamp(62px,10vw,114px)}
 .channel-avatar.large svg{width:34px;height:34px}
+.channel-avatar.collection-mark svg{color:var(--collection-color)}
+.channel-avatar.heading{width:40px;height:40px;border-radius:10px}
+.channel-avatar.heading svg{width:23px;height:23px}
+.collection-title{display:flex;align-items:center;gap:12px}
+.collection-picker{border:1px solid var(--edge);border-radius:10px;padding:12px;display:grid;gap:12px;min-width:0}
+.collection-picker legend{padding:0 5px;font-weight:600}
+.collection-icons{display:flex;flex-wrap:wrap;gap:7px}
+.collection-icons label{display:block;position:relative;cursor:pointer}
+.collection-icons input{position:absolute;opacity:0;width:1px;height:1px;min-height:0;padding:0}
+.collection-icons span{display:grid;place-items:center;width:40px;height:40px;border:1px solid var(--edge);border-radius:8px;color:var(--collection-color)}
+.collection-icons svg{width:21px;height:21px}
+.collection-icons input:checked+span{box-shadow:inset 0 0 0 2px var(--collection-color);background:var(--inside)}
+.collection-icons input:focus-visible+span{outline:2px solid var(--text);outline-offset:2px}
+.collection-color{display:flex;align-items:center;gap:12px;font-size:13px}
+.collection-color input{width:54px;min-height:34px;padding:3px;cursor:pointer}
 .channel-page{margin-bottom:26px}
 .channel-cover{width:100%;aspect-ratio:5/1;max-height:255px;min-height:105px;border-radius:17px;overflow:hidden;background:linear-gradient(110deg,#202020,#321e22);border:1px solid var(--edge)}
 .channel-cover img{width:100%;height:100%;object-fit:cover;display:block}

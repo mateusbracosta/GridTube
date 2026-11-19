@@ -12,6 +12,19 @@ const translations = {
   progressEstimate: ["estimado","estimated"],
   channels: ["Canais","Channels"],
   playlists: ["Playlists","Playlists"],
+  collectionAppearance: ["Ícone e cor","Icon and color"],
+  collectionColor: ["Cor do ícone","Icon color"],
+  customizeCollection: ["Personalizar","Customize"],
+  invalid_appearance: ["Escolha um ícone e uma cor válidos.","Choose a valid icon and color."],
+  iconFolder: ["Pasta","Folder"],
+  iconList: ["Lista","List"],
+  iconBook: ["Livro","Book"],
+  iconFilm: ["Filmes","Movies"],
+  iconMusic: ["Música","Music"],
+  iconGamepad: ["Jogos","Games"],
+  iconStar: ["Favoritos","Favorites"],
+  iconCompass: ["Bússola","Compass"],
+  iconTools: ["Ferramentas","Tools"],
   settings: ["Configurações","Settings"],
   system: ["Sistema","System"],
   exportPlaylist: ["Exportar playlist em ZIP","Export playlist as ZIP"],
@@ -259,8 +272,18 @@ const paths = {
   back:'<path d="m11 5-7 7 7 7M4 12h16"/>',
   theater:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M6 17h12"/>',
   gear:'<path d="M10 3h4l.6 2.5 1.5.9 2.5-.7 2 3.4-1.8 1.8v1.8l1.8 1.8-2 3.4-2.5-.7-1.5.9L14 21h-4l-.6-2.5-1.5-.9-2.5.7-2-3.4L5.2 13v-1.8L3.4 9.4l2-3.4 2.5.7 1.5-.9z"/><circle cx="12" cy="12" r="3"/>',
-  trash:'<path d="M4 7h16m-14 0 1 14h10l1-14M9 7V3h6v4m-5 4v6m4-6v6"/>'
+  trash:'<path d="M4 7h16m-14 0 1 14h10l1-14M9 7V3h6v4m-5 4v6m4-6v6"/>',
+  book:'<path d="M12 5c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1v15"/>',
+  film:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/>',
+  music:'<path d="M9 18V5l11-2v13M9 9l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/>',
+  gamepad:'<path d="M7 7h10c3 0 5 11 3 12-2 1-4-4-5-4H9c-1 0-3 5-5 4C2 18 4 7 7 7zM8 9v5M5.5 11.5h5"/><circle cx="16" cy="11" r=".8"/><circle cx="18" cy="13" r=".8"/>',
+  star:'<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"/>',
+  compass:'<circle cx="12" cy="12" r="9"/><path d="m16 8-2 6-6 2 2-6z"/>',
+  tools:'<path d="M14 5a5 5 0 0 0-6 6L3 16a3 3 0 0 0 5 5l5-5a5 5 0 0 0 6-6l-4 4-4-4z"/>'
 };
+const collectionIcons = [["folder","iconFolder"],["list","iconList"],["book","iconBook"],
+  ["film","iconFilm"],["music","iconMusic"],["gamepad","iconGamepad"],
+  ["star","iconStar"],["compass","iconCompass"],["tools","iconTools"]];
 const get = id => document.getElementById(id);
 const app = get("app"), modal = get("modal"), notice = get("notice");
 const appName = "GridTube";
@@ -412,9 +435,16 @@ function branding(channel, filename) {
   return `/branding/${encodeURIComponent(channel.id)}/${encodeURIComponent(filename)}`;
 }
 function channelAvatar(channel, size="") {
+  if (!channel.source) return collectionMark(channel,"folder",size);
   return channel.profile?.avatar
     ? `<img class="channel-avatar ${size}" src="${branding(channel,channel.profile.avatar)}" alt="">`
     : `<span class="channel-avatar placeholder ${size}">${icon("folder")}</span>`;
+}
+function collectionMark(collection, fallback="list", size="") {
+  const style = collection.appearance || {};
+  const glyph = collectionIcons.some(([name])=>name===style.icon) ? style.icon : fallback;
+  const color = /^#[a-f\d]{6}$/i.test(style.color) ? style.color : "#bebebe";
+  return `<span class="channel-avatar placeholder collection-mark ${size}" style="--collection-color:${color}">${icon(glyph)}</span>`;
 }
 function channelPage(channel, actions) {
   const profile = channel.profile || {};
@@ -447,7 +477,9 @@ function nav() {
     <div class="nav-head">${t("channels")}${btn("localChannel",t("localChannel"),"plus","flat icon-only")}</div>
     <div class="nav">${state.channels.map(c=>`<button type="button" class="${!watchPath()&&scope===`channel:${c.id}`?"active":""}" data-action="scope" data-value="channel:${c.id}" title="${esc(c.name)}" aria-label="${esc(c.name)}">${channelAvatar(c)}<span>${esc(c.name)}</span></button>`).join("")}</div>
     <div class="nav-head">${t("playlists")}${btn("addPlaylist",t("addPlaylist"),"plus","flat icon-only")}</div>
-    <div class="nav">${state.playlists.map(p=>item(`playlist:${p.id}`,p.name,"list")).join("")}</div>`;
+    <div class="nav">${state.playlists.map(p=>`<button type="button" class="${!watchPath()&&scope===`playlist:${p.id}`?"active":""}"
+      data-action="scope" data-value="playlist:${p.id}" title="${esc(p.name)}" aria-label="${esc(p.name)}">
+      ${collectionMark(p)}<span>${esc(p.name)}</span></button>`).join("")}</div>`;
   const navEl = get("navigation");
   if (navEl.dataset.rendered !== html) {
     navEl.innerHTML = html;
@@ -500,8 +532,9 @@ async function loadLibrary() {
       <div class="hero-content"><h1>${esc(hero?.title||t("title"))}</h1><p>${esc(hero?.source_channel||t(hero?"recent":"intro"))}</p>
       ${hero?btn("watch",t("play"),"play","accent",hero.id):btn("addChannel",t("addChannel"),"plus","accent")}
       </div></section><div class="section-head"><h2>${t("recent")}</h2></div>` :
-      channel ? channelPage(channel,actions) : `<div class="page-head"><h1>${esc(title)}</h1>${playlist?
-        `<a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
+      channel ? channelPage(channel,actions) : `<div class="page-head"><h1 class="${playlist?"collection-title":""}">${playlist?collectionMark(playlist,"list","heading"):""}${esc(title)}</h1>${playlist?
+        `${btn("editPlaylist",t("customizeCollection"),"settings","",playlist.id)}
+        <a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
     const isQueue = scope==="downloads", isRemoved = scope==="removed";
     const results = videos.length
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
@@ -831,13 +864,38 @@ function editChannel(channel) {
   simple(channel?"edit":"localChannel",`${field("name",channel?.name,"required maxlength=100")}
     ${channel?field("channelUrl",channel.source,"type=url"):""}
     ${channel?.source?field("titleFilter",channel.title_filter,`maxlength="120" placeholder="${t("titleExample")}"`):""}
+    ${!channel?.source?collectionFields(channel,"folder"):""}
     <label>${t("channelDescription")}<textarea name="description" maxlength="5000" rows="3">${esc(channel?.custom_description||"")}</textarea></label>
     <p class="note">${t("configNote")}</p>${prefs(channel?.overrides||{},true)}${auto}`,"save",async data=>{
     await api(channel?`/channels/${channel.id}`:"/channels",channel?"PUT":"POST",
       {name:data.get("name"),overrides:readPrefs(data),auto:data.has("auto"),description:data.get("description"),
         title_filter:data.get("titleFilter") ?? channel?.title_filter ?? "",
+        ...(!channel?.source?{appearance:readAppearance(data)}:{}),
         ...(channel?{source:data.get("channelUrl")}:{})}); await finish();
   });
+}
+function collectionFields(collection, fallback="list") {
+  const style = collection?.appearance || {icon:fallback,color:"#bebebe"};
+  const glyph = collectionIcons.some(([name])=>name===style.icon) ? style.icon : fallback;
+  const color = /^#[a-f\d]{6}$/i.test(style.color) ? style.color : "#bebebe";
+  return `<fieldset class="collection-picker" style="--collection-color:${color}"><legend>${t("collectionAppearance")}</legend>
+    <div class="collection-icons">${collectionIcons.map(([name,label])=>`<label title="${t(label)}">
+      <input type="radio" name="collectionIcon" value="${name}" aria-label="${t(label)}" ${name===glyph?"checked":""}>
+      <span>${icon(name)}</span></label>`).join("")}</div>
+    <label class="collection-color">${t("collectionColor")}<input type="color" name="collectionColor" value="${color}"></label>
+  </fieldset>`;
+}
+function readAppearance(data) {
+  return {icon:data.get("collectionIcon"),color:data.get("collectionColor")};
+}
+function editPlaylist(playlist) {
+  simple(playlist?"customizeCollection":"addPlaylist",
+    (playlist?`<strong>${esc(playlist.name)}</strong>`:field("name","","required maxlength=100"))+collectionFields(playlist),
+    "save",async data=>{
+      await api(playlist?`/playlists/${playlist.id}/appearance`:"/playlists",playlist?"PUT":"POST",
+        {...(!playlist?{name:data.get("name")}:{}),appearance:readAppearance(data)});
+      await finish();
+    });
 }
 function scanURL(source) { return `/scans?${new URLSearchParams({source})}`; }
 function catalogParams(session, mode={}) {
@@ -1454,8 +1512,8 @@ async function act(action,value) {
     case "settingsTab": settingsTab(value);break;
     case "updateDependency": await runMaintenance(false);break;
     case "restartDependency": await runMaintenance(true);break;
-    case "addPlaylist":
-      simple("addPlaylist",field("name","","required maxlength=100"),"save",async data=>{await api("/playlists","POST",Object.fromEntries(data));await finish();});break;
+    case "addPlaylist": editPlaylist();break;
+    case "editPlaylist": editPlaylist(state.playlists.find(p=>p.id===value));break;
     case "unplaylist": await api(`/playlists/${scope.slice(9)}/videos/${value}`,"DELETE");await finish();break;
     case "watch": openWatch(value);break;
     case "organize": organize(item);break;
@@ -1491,6 +1549,11 @@ document.addEventListener("click",event=>{
 });
 window.addEventListener("popstate",()=>showLocation(false,true));
 document.addEventListener("visibilitychange",()=>backgroundRefresh(true));
+document.addEventListener("input",event=>{
+  if (event.target.matches('[name="collectionColor"]')) {
+    event.target.closest(".collection-picker").style.setProperty("--collection-color",event.target.value);
+  }
+});
 shell();
 refresh().catch(error=>flash(t(error.message)));
 setInterval(()=>{if(!document.hidden&&(catalog?.pending||catalog?.autoPoll)&&modal.open) pollCatalog(catalog);},1600);

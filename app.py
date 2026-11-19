@@ -32,6 +32,7 @@ CHOICES = {"download_mode": {"compact", "original"},
            "quality": {"360", "480", "720", "1080", "1440", "2160", "best"},
            "shorts": {"include", "exclude", "only"}, "audio": {"original", "pt-BR", "en"},
            "subtitles": {"none", "pt-BR", "en", "both"}}
+COLLECTION_ICONS = {"folder", "list", "book", "film", "music", "gamepad", "star", "compass", "tools"}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), prefs TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS system_event (
@@ -44,6 +45,14 @@ CREATE TABLE IF NOT EXISTS channel (
     baseline INTEGER NOT NULL DEFAULT 0, title_filter TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS playlist (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS channel_style (
+    id TEXT PRIMARY KEY REFERENCES channel(id) ON DELETE CASCADE,
+    icon TEXT NOT NULL, color TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS playlist_style (
+    id TEXT PRIMARY KEY REFERENCES playlist(id) ON DELETE CASCADE,
+    icon TEXT NOT NULL, color TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS video (
     id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL,
     channel_id TEXT REFERENCES channel(id), kind TEXT NOT NULL,
@@ -153,6 +162,23 @@ def valid_selection(items):
 
 def timestamp():
     return int(time.time())
+
+
+def collection_appearance(value, default_icon="folder"):
+    if not isinstance(value, dict):
+        raise ValueError("invalid_appearance")
+    icon, color = value.get("icon", default_icon), value.get("color", "#bebebe")
+    if (not isinstance(icon, str) or icon not in COLLECTION_ICONS
+            or not isinstance(color, str) or not re.fullmatch(r"#[a-fA-F0-9]{6}", color)):
+        raise ValueError("invalid_appearance")
+    return {"icon": icon, "color": color.lower()}
+
+
+def save_collection_appearance(db, table, item_id, value, default_icon="folder"):
+    style = collection_appearance(value, default_icon)
+    db.execute(f"""INSERT INTO {table} (id,icon,color) VALUES (?,?,?)
+        ON CONFLICT(id) DO UPDATE SET icon=excluded.icon,color=excluded.color""",
+               (item_id, style["icon"], style["color"]))
 
 
 def system_event(db, area, code, detail=None, severity="info"):
@@ -343,6 +369,8 @@ class Archive:
                     raise ValueError("backup_invalid")
                 preferences(json.loads(row["overrides"]), partial=True)
                 checked_rule(row["title_filter"])
+        elif table in {"channel_style", "playlist_style"}:
+            collection_appearance(row)
         elif table == "track_job":
             if row["kind"] not in {"audio", "subtitle"} or not collector.LANGUAGE_TAG.fullmatch(row["code"]):
                 raise ValueError("backup_invalid")
@@ -1425,14 +1453,20 @@ def create_app(data=None, root=None, workers=True):
     def state():
         with archive.db() as db:
             channels = []
-            for row in db.execute("""SELECT c.*,p.profile,d.description AS custom_description FROM channel c
+            for row in db.execute("""SELECT c.*,p.profile,d.description AS custom_description,s.icon,s.color FROM channel c
                      LEFT JOIN channel_profile p ON c.source=p.source
-                     LEFT JOIN channel_description d ON c.id=d.channel_id ORDER BY c.name COLLATE NOCASE"""):
+                     LEFT JOIN channel_description d ON c.id=d.channel_id
+                     LEFT JOIN channel_style s ON c.id=s.id ORDER BY c.name COLLATE NOCASE"""):
                 channel = dict(row)
                 channel["overrides"] = json.loads(row["overrides"])
                 channel["profile"] = json.loads(row["profile"]) if row["profile"] else {}
+                style = {"icon": channel.pop("icon") or "folder", "color": channel.pop("color") or "#bebebe"}
+                channel["appearance"] = None if channel["source"] else style
                 channels.append(channel)
-            playlists = [dict(row) for row in db.execute("SELECT * FROM playlist ORDER BY name COLLATE NOCASE")]
+            playlists = [{"id": row["id"], "name": row["name"],
+                          "appearance": {"icon": row["icon"] or "list", "color": row["color"] or "#bebebe"}}
+                         for row in db.execute("""SELECT p.*,s.icon,s.color FROM playlist p
+                             LEFT JOIN playlist_style s ON p.id=s.id ORDER BY p.name COLLATE NOCASE""")]
             counts = dict(db.execute("SELECT state,count(*) FROM video GROUP BY state"))
             return jsonify(settings=archive.defaults(db), channels=channels, playlists=playlists, counts=counts)
 
@@ -1627,6 +1661,8 @@ def create_app(data=None, root=None, workers=True):
                                              preferences(data.get("overrides", {}), partial=True),
                                              bool(source and data.get("auto") is True),
                                              checked_rule(data.get("title_filter", "")))
+            if not source and "appearance" in data:
+                save_collection_appearance(db, "channel_style", channel["id"], data["appearance"])
             if data.get("description"):
                 description = data["description"]
                 if not isinstance(description, str) or len(description) > 5000:
@@ -1670,6 +1706,11 @@ def create_app(data=None, root=None, workers=True):
                     db.execute("DELETE FROM seen WHERE channel_id=?", (channel_id,))
                     if source:
                         archive.catalog.submit(archive.refresh_profile, source)
+            current = archive.channel(db, channel_id)
+            if current["source"]:
+                db.execute("DELETE FROM channel_style WHERE id=?", (channel_id,))
+            elif "appearance" in data:
+                save_collection_appearance(db, "channel_style", channel_id, data["appearance"])
         return jsonify(ok=True)
 
     @app.post("/api/channels/<channel_id>/profile")
@@ -1921,10 +1962,21 @@ def create_app(data=None, root=None, workers=True):
         with archive.files_lock:
             with archive.db() as db:
                 db.execute("INSERT INTO playlist VALUES (?,?)", (playlist_id, label(data.get("name"))))
+                if "appearance" in data:
+                    save_collection_appearance(db, "playlist_style", playlist_id, data["appearance"], "list")
                 if data.get("video"):
                     db.execute("INSERT INTO playlist_item VALUES (?,?)", (playlist_id, data["video"]))
             archive.refresh_playlist_files([playlist_id])
         return jsonify(id=playlist_id), 201
+
+    @app.put("/api/playlists/<playlist_id>/appearance")
+    def update_playlist_appearance(playlist_id):
+        data = local_change()
+        with archive.db() as db:
+            if not db.execute("SELECT 1 FROM playlist WHERE id=?", (playlist_id,)).fetchone():
+                abort(404)
+            save_collection_appearance(db, "playlist_style", playlist_id, data.get("appearance"), "list")
+        return jsonify(ok=True)
 
     @app.put("/api/playlists/<playlist_id>/videos/<video_id>")
     def add_to_playlist(playlist_id, video_id):
