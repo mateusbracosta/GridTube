@@ -57,6 +57,8 @@ def replace_catalog(db, candidate=None):
         db.execute("ATTACH DATABASE ? AS restored", (str(candidate),))
     db.execute("BEGIN IMMEDIATE")
     for table in (*CACHE_TABLES, *reversed(TABLES)):
+        if candidate is not None and table == "channel_profile":
+            continue
         db.execute(f"DELETE FROM {table}")
     if candidate is not None:
         available = {row[0] for row in db.execute("SELECT name FROM restored.sqlite_master WHERE type='table'")}

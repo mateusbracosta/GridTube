@@ -7,7 +7,8 @@ COPY --from=javascript /usr/local/bin/node /usr/local/bin/node
 RUN node --version
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip==26.3 \
+    && python -m pip install --no-cache-dir -r requirements.txt
 COPY app.py collector.py dependencies.py playlist_files.py catalog_backup.py ./
 COPY static/ static/
 EXPOSE 8080

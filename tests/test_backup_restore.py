@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -139,6 +140,27 @@ class BackupRestoreTests(unittest.TestCase):
             response = self.client.put(f"/api/playlists/{self.playlist}/appearance", json={"appearance": style})
             self.assertEqual(response.json["error"], "invalid_appearance")
         self.assertEqual(self.client.get("/api/state").json["playlists"][0]["appearance"]["icon"], "list")
+
+    def test_restore_and_profile_refresh_keep_the_cached_avatar(self):
+        source = "https://www.youtube.com/@creator"
+        self.client.post("/api/channels", json={"name": "Creator", "source": source})
+        key = hashlib.sha256(source.encode()).hexdigest()
+        directory = self.archive.branding / key
+        directory.mkdir()
+        (directory / "avatar.jpg").write_bytes(b"cached avatar")
+        with self.archive.db() as db:
+            db.execute("INSERT INTO channel_profile VALUES (?,?,?)",
+                       (source, json.dumps({"name": "Creator", "avatar": "avatar.jpg"}), key))
+        with patch("collector.save_channel_image", return_value=None):
+            self.archive.save_profile(source, {"name": "Creator", "avatar": None, "banner": None})
+        with self.client.get("/api/system/backup") as response:
+            self.backup = response.data
+        self.prepare_restore()
+        restored = self.open_app().test_client()
+        channel = restored.get("/api/state").json["channels"][0]
+        self.assertEqual(channel["profile"]["avatar"], "avatar.jpg")
+        with restored.get(f"/branding/{channel['id']}/avatar.jpg") as response:
+            self.assertEqual(response.data, b"cached avatar")
 
 
 if __name__ == "__main__":

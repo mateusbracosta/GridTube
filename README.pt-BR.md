@@ -6,9 +6,11 @@ Biblioteca de vídeos auto-hospedada para adquirir conteúdo quando há internet
 
 ## Rodar no Docker
 
-Com o Docker Engine e o Compose ativos, execute na pasta do projeto.
+Com Git, Docker Engine e Compose instalados, clone o repositório e inicie o GridTube.
 
 ~~~sh
+git clone https://github.com/mateusbracosta/GridTube.git
+cd GridTube
 docker compose up -d --build
 ~~~
 
@@ -126,8 +128,8 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.10.tar gridtube:0.7.10
-docker load -i gridtube-0.7.10.tar
+docker save -o gridtube-0.7.11.tar gridtube:0.7.11
+docker load -i gridtube-0.7.11.tar
 docker compose up -d --no-build --pull never
 ~~~
 

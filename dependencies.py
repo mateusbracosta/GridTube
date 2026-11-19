@@ -24,7 +24,9 @@ from yt_dlp.networking.exceptions import HTTPError
 from yt_dlp.version import __version__
 import yt_dlp
 assert Path(yt_dlp.__file__).resolve().is_relative_to(path)
-assert __version__ == sys.argv[2]
+reported_version = tuple(map(int, __version__.split(".")))
+selected_version = tuple(map(int, sys.argv[2].split(".")))
+assert reported_version == selected_version
 with YoutubeDL({'quiet': True}):
     pass
 """

@@ -11,9 +11,11 @@ GridTube is a self-hosted video library for preserving YouTube videos and watchi
 
 ## Run with Docker
 
-Run these commands from the repository directory with Docker and Compose installed.
+With Git, Docker and Compose installed, clone the repository and start GridTube.
 
 ~~~sh
+git clone https://github.com/mateusbracosta/GridTube.git
+cd GridTube
 docker compose up -d --build --wait
 ~~~
 

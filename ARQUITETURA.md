@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Aplicação própria de preservação de vídeos. A aquisição consulta o YouTube quando há rede. O acervo, as imagens de canais já obtidas, os metadados, a busca, as playlists e a reprodução usam o servidor local. O arquivo [Estudo - Untube](Estudo%20-%20Untube.md) registra a referência original. Os comandos de instalação e atualização estão no [README](README.md).
+Aplicação própria de preservação de vídeos, com referência funcional no [UnTube](https://github.com/tomfriart/untube). A aquisição consulta o YouTube quando há rede. O acervo, as imagens de canais já obtidas, os metadados, a busca, as playlists e a reprodução usam o servidor local. Os comandos de instalação e atualização estão no [README](README.md).
 
 ## Componentes
 
@@ -58,17 +58,22 @@ O Compose monta `GRIDTUBE_ARCHIVE_PATH` em `/archive`. O valor padrão é `./arc
 - A recuperação valida a mídia e o manifesto antes de confirmar a publicação. Um destino incompleto é preservado e aparece como falha em Downloads quando a mídia original está ausente. Uma nova captura recebe um nome livre se a pasta planejada já existir. Uma falha operacional transitória do SQLite faz a fila revisar publicações pendentes e retomar os trabalhos em execução.
 - O cancelamento de captura usa o estado persistente `cancelling` e um sinal de interrupção consultado pelos hooks do yt-dlp e pelo processo FFmpeg. A publicação e o cancelamento são serializados pela trava de arquivos. Depois da interrupção, a limpeza apaga os temporários específicos e retira a tarefa da fila. Se a captura substituía mídia de um registro anterior, o vídeo volta para Removidos com progresso e playlists. Na inicialização, pedidos de cancelamento pendentes são concluídos. Uma falha de permissão fica visível na tarefa para repetir a limpeza.
 - Em servidores pequenos, `GRIDTUBE_PLAYBACK_CACHE_MIB` limita o cache de áudios alternativos. A poda ocorre ao gerar uma variante, mantendo a variante atual. Requisições parciais de variantes já existentes não percorrem o cache; a marca de uso de cada arquivo é atualizada no máximo uma vez por minuto.
+- A preparação de áudio alternativo libera a trava geral de arquivos enquanto o FFmpeg trabalha. O vídeo de origem fica protegido contra movimentação e exclusão física até a conclusão. A mídia principal e variantes já preparadas continuam disponíveis durante a conversão.
 - Remover um vídeo muda seu estado para `removed`, preservando o bundle, as playlists e o progresso. A mídia deixa de ser servida pelo GridTube e pode ser restaurada em **Removidos**. Para exclusão física, o app valida o caminho específico do bundle, move a pasta para `archive/work/deleting`, limpa os caches de reprodução associados e remove o registro do banco após apagar a pasta. Se houver falha após a movimentação, a exclusão pode ser repetida em **Removidos**.
 - **Conferir arquivos do acervo** verifica os vídeos publicados sob demanda. Para um caminho ausente, procura candidatos por ID no nome da pasta e no manifesto nos canais existentes e em `Avulsos`. Um destino único atualiza o catálogo e o M3U. Se a mídia continuar ausente, o vídeo vai para **Removidos** com os mesmos vínculos. A conferência detecta mídia devolvida ao acervo e respeita remoções manuais do app. Bibliotecas montadas no Nextcloud devem expor somente `library/`; a conferência atualiza o catálogo sem mover ou excluir a mídia.
 - Para restaurar o conjunto, recupere `data/`, `archive/library/`, o Compose e a imagem da mesma arquitetura. Aponte o Jellyfin para `archive/library` em modo somente leitura. O índice do Jellyfin é independente.
 
 ## API e verificação
 
-Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.10 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+Os testes offline usam acervos descartáveis. No shell POSIX, rode `docker run --rm --network none -v "$PWD/tests:/tests:ro" gridtube:0.7.11 python -m unittest discover -s /tests -v`. No PowerShell, substitua `$PWD/tests` por `${PWD}/tests`.
+
+A suíte cobre publicação e recuperação da fila, cancelamento, remoção de faixas, alterações externas no acervo, exportação, restauração com rollback, personalização de coleções, validação da API e reprodução concorrente à preparação de áudio. Para testar ARM64 em outro host, construa com `docker build --platform linux/arm64 -t gridtube:0.7.11-arm64 .` e use essa plataforma e imagem no comando dos testes. A emulação verifica compatibilidade funcional; medições de desempenho da placa exigem a Orange Pi física.
 
 `GET /api/system/backup` transmite um catálogo JSONL versionado. A prévia importa somente tabelas conhecidas em um SQLite temporário, valida caminhos e informa os arquivos ausentes. A restauração ou a limpeza registra uma operação pendente em `data/maintenance` e o processo do Docker reinicia. Na inicialização seguinte, o catálogo é substituído ou esvaziado em uma transação. As pastas derivadas são recriadas. A exclusão da biblioteca exige confirmação distinta da limpeza de dados e afeta apenas `library/` da montagem de acervo.
 
 Na interface, **Restaurar backup** abre a seleção do arquivo e encadeia a validação, a restauração e a consulta do resultado. Antes do commit, a restauração compara todas as tabelas persistidas com o candidato validado e executa as verificações de integridade e chaves estrangeiras do SQLite. Após o commit, uma nova conexão repete a conferência. O resultado registra o token da operação e `GET /api/system/backup/status/{token}` permite confirmar a restauração correspondente após o reinício. Um resultado anterior de outra operação é ignorado.
+
+Perfis já cacheados no servidor são preservados ao restaurar o catálogo. Uma atualização remota sem imagem também mantém o avatar e a capa locais. A limpeza completa do app remove esse cache.
 
 A biblioteca usa `GET /api/videos?summary=1` para carregar somente os dados dos cartões. `GET /api/videos` e a rota individual de faixas preservam os metadados completos. O catálogo dispensa comparações de texto ao listar sem filtro. Na interface, consultas de fundo são pausadas com a aba oculta e espaçadas quando a biblioteca ou o player estão sem atividade. A captura gera a miniatura com um único thread do FFmpeg.
 

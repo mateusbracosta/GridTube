@@ -196,6 +196,7 @@ class Archive:
         self.work = self.library.parent / "work"
         self.playlist_directory = self.library.parent / "Playlists"
         self.exporting = Counter()
+        self.preparing_playback = Counter()
         self.maintenance = self.data / "maintenance"
         self.pending_maintenance = self.maintenance / "pending.json"
         self.maintenance_lock = threading.Lock()
@@ -435,6 +436,8 @@ class Archive:
                 raise ValueError("maintenance_pending")
             if self.exporting:
                 raise ValueError("playlist_export_busy")
+            if self.preparing_playback:
+                raise ValueError("playback_busy")
             token = operation.get("token")
             if operation["action"] == "restore" and not self.backup_candidate(token).is_file():
                 raise ValueError("backup_preview_missing")
@@ -521,8 +524,10 @@ class Archive:
                 "can_restart": os.environ.get("GRIDTUBE_RESTART_IN_DOCKER") == "1"}
 
     def channel(self, db, channel_id):
-        if not channel_id:
+        if channel_id is None or channel_id == "":
             return None
+        if not isinstance(channel_id, str) or not re.fullmatch(r"[a-f0-9]{10}", channel_id):
+            raise ValueError("invalid_channel")
         row = db.execute("SELECT * FROM channel WHERE id=?", (channel_id,)).fetchone()
         if row is None:
             abort(404)
@@ -654,7 +659,7 @@ class Archive:
             except Exception:
                 logging.warning("Could not cache channel %s for %s", name, source)
                 filename = previous.get(name)
-            profile[name] = filename
+            profile[name] = filename or previous.get(name)
         with self.db() as db:
             db.execute("""INSERT INTO channel_profile VALUES (?,?,?) ON CONFLICT(source) DO UPDATE
                           SET profile=excluded.profile, asset_key=excluded.asset_key""",
@@ -796,6 +801,8 @@ class Archive:
                         AND code=? AND state='failed'""", (video_id, kind, code)).rowcount)
             if self.exporting[video_id]:
                 raise ValueError("playlist_export_busy")
+            if self.preparing_playback[video_id]:
+                raise ValueError("playback_busy")
             with tempfile.TemporaryDirectory(prefix="delete-track-", dir=self.work) as temp:
                 staged = Path(temp) / "track"
                 manifest_changed = False
@@ -840,32 +847,55 @@ class Archive:
                     raise
             return True
 
+    def playback_files(self, video_id, code):
+        with self.db() as db:
+            row = self.ready_video(db, video_id)
+            metadata = json.loads(row["metadata"])
+        audio = metadata.get("audio_tracks", {}).get(code)
+        if not audio:
+            abort(404)
+        folder = self.video_bundle(row)
+        base_path = self.playlist_asset(folder, metadata["filename"])
+        audio_path = self.playlist_asset(folder, audio)
+        if not base_path.is_file() or not audio_path.is_file():
+            abort(404)
+        variant = self.playback / f"{video_id}-{self.playback_cache_name(video_id, code, base_path, audio_path)}"
+        return base_path, audio_path, variant
+
+    def serve_playback(self, variant):
+        info = variant.stat()
+        now = time.time_ns()
+        if now - info.st_atime_ns >= 60 * 10**9:
+            os.utime(variant, ns=(now, info.st_mtime_ns))
+        return send_from_directory(self.playback, variant.name, conditional=True)
+
     def playback_variant(self, video_id, code):
-        with self.playback_lock, self.files_lock:
-            with self.db() as db:
-                row = self.ready_video(db, video_id)
-                metadata = json.loads(row["metadata"])
-            audio = metadata.get("audio_tracks", {}).get(code)
-            if not audio:
-                abort(404)
-            folder = self.library / row["folder"]
-            base_path = folder / metadata["filename"]
-            audio_path = folder / audio
-            variant = self.playback / f"{video_id}-{self.playback_cache_name(video_id, code, base_path, audio_path)}"
+        with self.files_lock:
+            _, _, variant = self.playback_files(video_id, code)
+            if variant.is_file():
+                return self.serve_playback(variant)
+        with self.playback_lock:
+            with self.files_lock:
+                if self.pending_maintenance.exists():
+                    raise ValueError("maintenance_pending")
+                base_path, audio_path, variant = self.playback_files(video_id, code)
+                if variant.is_file():
+                    return self.serve_playback(variant)
+                self.preparing_playback[video_id] += 1
             try:
-                info = variant.stat()
-            except FileNotFoundError:
                 with tempfile.TemporaryDirectory(prefix="mux-", dir=self.playback) as temp:
                     staged = Path(temp) / variant.name
                     codec = "libopus" if base_path.suffix == ".webm" else "copy"
                     collector.mux_video(base_path, staged, code, audio_path, audio_codec=codec)
-                    staged.replace(variant)
-                self.prune_playback(variant)
-            else:
-                now = time.time_ns()
-                if now - info.st_atime_ns >= 60 * 10**9:
-                    os.utime(variant, ns=(now, info.st_mtime_ns))
-            return send_from_directory(self.playback, variant.name, conditional=True)
+                    with self.files_lock:
+                        staged.replace(variant)
+                        self.prune_playback(variant)
+                        return self.serve_playback(variant)
+            finally:
+                with self.files_lock:
+                    self.preparing_playback[video_id] -= 1
+                    if not self.preparing_playback[video_id]:
+                        del self.preparing_playback[video_id]
 
     @staticmethod
     def playback_cache_name(video_id, code, base_path, audio_path):
@@ -1166,6 +1196,8 @@ class Archive:
         with self.files_lock:
             if self.exporting[video_id]:
                 raise ValueError("playlist_export_busy")
+            if self.preparing_playback[video_id]:
+                raise ValueError("playback_busy")
             with self.db() as db:
                 row = db.execute("SELECT * FROM video WHERE id=? AND state='ready'", (video_id,)).fetchone()
                 if row is None:
@@ -1258,7 +1290,7 @@ class Archive:
                 missing = {}
                 changes = []
                 for row in rows:
-                    if self.exporting[row["id"]]:
+                    if self.exporting[row["id"]] or self.preparing_playback[row["id"]]:
                         continue
                     if not self.archived_picture_exists(row):
                         missing[row["id"]] = row
@@ -1299,6 +1331,8 @@ class Archive:
         with self.files_lock:
             if disk and self.exporting[video_id]:
                 raise ValueError("playlist_export_busy")
+            if disk and self.preparing_playback[video_id]:
+                raise ValueError("playback_busy")
             with self.db() as db:
                 row = db.execute("SELECT * FROM video WHERE id=? AND state IN ('ready','removed')",
                                  (video_id,)).fetchone()
@@ -1772,7 +1806,7 @@ def create_app(data=None, root=None, workers=True):
         overrides = capture_preferences(data.get("overrides", {}))
         kind = "shorts" if "/shorts/" in url else "videos"
         with archive.db() as db:
-            channel = archive.channel(db, data.get("channel") or None)
+            channel = archive.channel(db, data.get("channel"))
             prefs = {**archive.effective(db, channel), **overrides}
             queued = archive.enqueue(db, {"id": video_id, "url": url, "title": video_id, "kind": kind},
                                      channel, prefs, overrides)
@@ -1818,7 +1852,7 @@ def create_app(data=None, root=None, workers=True):
         elif scope.startswith("playlist:"):
             where += " AND id IN (SELECT video_id FROM playlist_item WHERE playlist_id=?)"
             params.append(scope.split(":", 1)[1])
-        page = max(1, request.args.get("page", 1, type=int))
+        page = min(1000000, max(1, request.args.get("page", 1, type=int)))
         with archive.db() as db:
             db.execute("BEGIN")
             total = db.execute(f"SELECT count(*) FROM video WHERE {where}", params).fetchone()[0]
@@ -1952,20 +1986,23 @@ def create_app(data=None, root=None, workers=True):
     @app.post("/api/videos/<video_id>/move")
     def move(video_id):
         data = body()
-        archive.move(video_id, data.get("channel") or None, data.get("name"))
+        archive.move(video_id, data.get("channel"), data.get("name"))
         return jsonify(ok=True)
 
     @app.post("/api/playlists")
     def add_playlist():
         data = body()
+        video_id = data.get("video")
+        if video_id is not None and video_id != "" and (not isinstance(video_id, str) or not collector.VIDEO_ID.fullmatch(video_id)):
+            raise ValueError("invalid_selection")
         playlist_id = uuid.uuid4().hex[:10]
         with archive.files_lock:
             with archive.db() as db:
                 db.execute("INSERT INTO playlist VALUES (?,?)", (playlist_id, label(data.get("name"))))
                 if "appearance" in data:
                     save_collection_appearance(db, "playlist_style", playlist_id, data["appearance"], "list")
-                if data.get("video"):
-                    db.execute("INSERT INTO playlist_item VALUES (?,?)", (playlist_id, data["video"]))
+                if video_id:
+                    db.execute("INSERT INTO playlist_item VALUES (?,?)", (playlist_id, video_id))
             archive.refresh_playlist_files([playlist_id])
         return jsonify(id=playlist_id), 201
 
