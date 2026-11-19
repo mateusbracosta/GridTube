@@ -364,11 +364,11 @@ function debounced(fn) {
 function shell() {
   disposeWatch();
   document.documentElement.lang = locale;
-  const mark = `<img class="mark" src="/favicon.ico" alt="">`;
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><a class="brand" href="/" data-action="scope" aria-label="${t("library")}" title="${t("library")}">${mark}<span class="brand-name">${appName}</span></a>
+  const mark = `<img class="mark" src="/static/icon.svg" alt="">`;
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><a class="brand" href="/" data-action="home" aria-label="${t("library")}" title="${t("library")}">${mark}<span class="brand-name">${appName}</span></a>
     <nav id="navigation"></nav><div class="nav-add">${btn("addChannel",t("addChannel"),"plus")}${btn("settings",t("settings"),"settings","flat")}</div></aside>
     <div class="workspace"><header class="top">${btn("menu",t("menu"),"list","mobile-nav icon-only")}
-    <a class="mobile-brand" href="/" data-action="scope" aria-label="${t("library")}" title="${t("library")}">${mark}</a>
+    <a class="mobile-brand" href="/" data-action="home" aria-label="${t("library")}" title="${t("library")}">${mark}</a>
     <input id="search" class="search" type="search" aria-label="${t("search")}" placeholder="${t("search")}" value="${esc(search)}">
     <button class="accent" data-action="link" aria-label="${t("addLink")}" title="${t("addLink")}">${icon("link")} <span class="text-extra">${t("addLink")}</span></button>
     <select id="language" aria-label="${t("language")}"><option value="pt-BR">PT-BR</option><option value="en">EN</option></select>
@@ -1652,6 +1652,10 @@ async function confirmBulkRemove(kind, id) {
 async function act(action,value) {
   const item = watchVideo?.id===value ? watchVideo : displayed.find(v=>v.id===value);
   switch (action) {
+    case "home":
+      if (!watchPath()&&!scope) location.reload();
+      else showLibrary("");
+      break;
     case "menu": app.querySelector(".shell").classList.toggle("menu"); break;
     case "scope":
       showLibrary(value);break;

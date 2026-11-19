@@ -4,6 +4,8 @@
 
 Biblioteca de vídeos auto-hospedada para adquirir conteúdo quando há internet e consultar o acervo pela rede local.
 
+Clique no logo GridTube para voltar à biblioteca de outra tela. Se já estiver na biblioteca, o clique recarrega a página. O símbolo vermelho de grade e reprodução aparece no app e no favicon do navegador.
+
 ## Rodar no Docker
 
 Com Git, Docker Engine e Compose instalados, clone o repositório e inicie o GridTube.
@@ -136,7 +138,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.11.tar gridtube:0.7.14
+docker save -o gridtube-0.7.11.tar gridtube:0.7.15
 docker load -i gridtube-0.7.11.tar
 docker compose up -d --no-build --pull never
 ~~~

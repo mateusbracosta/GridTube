@@ -21,6 +21,8 @@ docker compose up -d --build --wait
 
 Open [GridTube](http://localhost:3987). The default bind address is 127.0.0.1. To use it on a trusted local network, set `GRIDTUBE_BIND` to your host's LAN IP address. `GRIDTUBE_PORT` changes the host port. GridTube currently has no user authentication.
 
+Click the GridTube logo to return to the library from another screen. Clicking it while already in the library reloads the page. The red grid-and-play symbol is used in the app and its browser favicon.
+
 ### Choose a drive and folder for your videos
 
 Before starting GridTube, create a `.env` file next to `compose.yaml` and set the archive path on the Docker host. Choose the line for your system and replace the example path.

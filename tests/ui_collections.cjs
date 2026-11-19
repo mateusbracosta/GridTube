@@ -25,6 +25,10 @@ const server = require('node:http').createServer((req,res)=>{
     if (url.pathname==='/') return send('text/html; charset=utf-8',fs.readFileSync('static/index.html','utf8').replace('</head>',"<script>if(localStorage.getItem('gridtube.ui-test.detect')!=='1')localStorage.setItem('gridtube.locale','pt-BR')</script></head>"));
     if (url.pathname==='/static/app.js') return send('text/javascript; charset=utf-8',fs.readFileSync('static/app.js'));
     if (url.pathname==='/static/style.css') return send('text/css',fs.readFileSync('static/style.css'));
+    if (url.pathname==='/static/icon.svg') return send('image/svg+xml',fs.readFileSync('static/icon.svg'));
+    if (url.pathname==='/favicon.ico') return send('image/x-icon',fs.readFileSync('static/favicon.ico'));
+    if (url.pathname==='/api/videos/item0000099/tracks') return json({video:{id:'item0000099',title:'Test video',filename:'main.mp4',state:'ready',duration:60},jobs:[]});
+    if (url.pathname==='/api/videos/item0000099/progress') return json({ok:true});
     if (url.pathname==='/api/state') return json({...state,channels:state.channels.map(row=>row===regionalChannel?{...row,
       profile:{description:req.headers['x-gridtube-locale']==='pt-BR'?'Seja bem-vindo ao meu arquivo.':'Welcome to my archive.',locale_available:true}}:row)});
     if (url.pathname==='/api/videos') {
@@ -185,7 +189,29 @@ async function run() {
     await cdp('Page.reload',{ignoreCache:true});
     await until(()=>evaluate('document.documentElement.lang==="en"&&document.querySelector("#language")?.value==="en"'),'Browser language was not selected on first visit');
     await until(()=>requests.filter(r=>r.path==='/api/state').at(-1)?.locale==='en-GB','Browser region not sent to the server');
-    console.log('Chromium verified: channel deletion inside editor, localized PT-BR/EN profiles, hidden selection controls, right-click selection, page and Shift selection, bulk deletion, unified creation, danger colors and mobile layout.');
+    await evaluate('window.gridtubeHomeMarker="same document"');
+    await click('.mobile-brand');
+    await until(()=>evaluate('Boolean(document.querySelector(".hero"))&&!document.querySelector(".channel-page")'),'Brand did not return to the library');
+    assert.equal(await evaluate('window.gridtubeHomeMarker'),'same document');
+    await click('.mobile-brand');
+    await until(()=>evaluate('window.gridtubeHomeMarker===undefined&&Boolean(document.querySelector(".hero"))'),'Brand did not reload the library page');
+    assert.equal(await evaluate('document.querySelector(".mobile-brand .mark").getAttribute("src")'),'/static/icon.svg');
+    await until(()=>evaluate('document.querySelector(".mobile-brand .mark").naturalWidth>0'),'New icon did not load');
+    assert.equal(await evaluate('document.querySelector("link[rel=icon]").getAttribute("href")'),'/favicon.ico?v=red-grid');
+    await cdp('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
+    await evaluate('history.pushState({watchFromApp:true},"","/watch/item0000099");dispatchEvent(new PopStateEvent("popstate"))');
+    await until(()=>evaluate('Boolean(document.querySelector("#player"))'),'Watch route unavailable');
+    await click('.brand');
+    await until(()=>evaluate('location.pathname==="/"&&Boolean(document.querySelector(".hero"))&&!document.querySelector("#player")'),'Desktop brand did not leave the watch route');
+    const brandImage=await cdp('Page.captureScreenshot',{format:'png',clip:{x:0,y:0,width:235,height:100,scale:1}});
+    fs.writeFileSync(path.join(os.tmpdir(),'gridtube-brand-preview.png'),Buffer.from(brandImage.data,'base64'));
+    const ico=fs.readFileSync('static/favicon.ico');
+    assert.equal(ico.readUInt16LE(2),1);assert.equal(ico.readUInt16LE(4),6);
+    for(let index=0;index<6;index++){
+      const entry=6+index*16,size=ico[entry]||256,length=ico.readUInt32LE(entry+8),offset=ico.readUInt32LE(entry+12);
+      assert.ok(offset+length<=ico.length);assert.equal(ico.readUInt32BE(offset+16),size);assert.equal(ico.readUInt32BE(offset+20),size);
+    }
+    console.log('Chromium verified: brand navigation from channel/watch, full reload in library, new SVG and favicon sizes, channel editor, localized profiles, selection, bulk deletion and mobile layout.');
     console.log('Screenshot:',screenshotPath);
   } finally {
     socket?.close();
