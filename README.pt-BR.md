@@ -56,7 +56,9 @@ Em canais locais, escolha **Ícone e cor** ao criar ou editar. Nas playlists cri
 
 Clique com o botão direito no vídeo e escolha **Selecionar vídeo**, ou use o menu de três pontos, para começar a selecionar itens. A barra e as caixas de seleção aparecem depois do primeiro item marcado e somem ao desmarcar o último ou limpar a seleção. **Selecionar esta página** marca os itens visíveis; a seleção é mantida ao trocar de página. Shift + clique seleciona um intervalo na página atual. Trocar de coleção ou busca limpa a seleção. **Excluir selecionados** oferece manter os arquivos ou apagá-los do disco.
 
-Os cabeçalhos de canais e playlists oferecem **Excluir canal e vídeos** e **Excluir playlist e vídeos**. A confirmação inclui todos os itens da coleção, de todas as páginas, e avisa sobre vídeos compartilhados com outras playlists. Excluir os vídeos de uma playlist afeta os mesmos vídeos na biblioteca inteira. Mantendo os arquivos, os vídeos ficam em **Removidos**; depois de excluir um canal, os vídeos restaurados ficam em **Avulsos**. Downloads em andamento são interrompidos antes de apagar seus arquivos. A coleção excluída não é preservada.
+Use **Editar canal → Excluir canal e vídeos** para remover um canal. Nas playlists, **Excluir playlist e vídeos** fica no cabeçalho. A confirmação inclui todos os itens da coleção, de todas as páginas, e avisa sobre vídeos compartilhados com outras playlists. Excluir os vídeos de uma playlist afeta os mesmos vídeos na biblioteca inteira. Mantendo os arquivos, os vídeos ficam em **Removidos**; depois de excluir um canal, os vídeos restaurados ficam em **Avulsos**. Downloads em andamento são interrompidos antes de apagar seus arquivos. A coleção excluída não é preservada.
+
+Os perfis de canais priorizam o idioma escolhido no app e a preferência regional do navegador. Na primeira visita, a interface usa um idioma compatível do navegador; uma escolha PT-BR/EN já salva tem prioridade. Ao abrir um canal, o app consulta o perfil no idioma escolhido se essa versão ainda não estiver salva. As versões ficam disponíveis offline, sem uma sobrescrever a outra ao trocar de idioma. O YouTube pode devolver o texto original quando não houver tradução. Nomes e descrições personalizados permanecem como foram escritos.
 
 Em **Organizar vídeo**, as listas de canais e playlists incluem **Criar novo canal…** e **Criar nova playlist…**. Salvar o formulário de criação move ou adiciona o vídeo automaticamente. Ações de exclusão usam vermelho e lixeira; confirmações para apagar do disco têm botão vermelho preenchido.
 
@@ -134,7 +136,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-0.7.11.tar gridtube:0.7.13
+docker save -o gridtube-0.7.11.tar gridtube:0.7.14
 docker load -i gridtube-0.7.11.tar
 docker compose up -d --no-build --pull never
 ~~~

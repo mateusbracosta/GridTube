@@ -10,6 +10,7 @@ import threading
 import time
 import unicodedata
 from email.utils import parsedate_to_datetime
+from http.cookiejar import Cookie
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
@@ -161,9 +162,27 @@ def channel_profile(info):
     }
 
 
-def fetch_channel_profile(source):
-    with YoutubeDL(options(extract_flat=True, lazy_playlist=True, playlistend=1)) as downloader:
-        return channel_profile(downloader.extract_info(source, download=False))
+def profile_locale(value):
+    match = re.fullmatch(r"en(?:-([a-z]{2}))?", str(value or "").strip(), re.I)
+    return f"en-{(match[1] or 'US').upper()}" if match else "pt-BR"
+
+
+def fetch_channel_profile(source, locale="pt-BR"):
+    locale = profile_locale(locale)
+    region = locale.split("-")[1]
+    language = "pt" if locale == "pt-BR" else locale if locale in {"en-GB", "en-IN"} else "en"
+    args = options(extract_flat=True, lazy_playlist=True, playlistend=1,
+                   extractor_args={"youtube": {"lang": [language]}},
+                   http_headers={"Accept-Language": f"{locale},{language};q=0.9"})
+    with YoutubeDL(args) as downloader:
+        # Session-only regional preferences; no account or browser cookies are used.
+        downloader.cookiejar.set_cookie(Cookie(
+            version=0, name="PREF", value=urlencode({"hl": language, "gl": region}),
+            port=None, port_specified=False, domain=".youtube.com", domain_specified=True,
+            domain_initial_dot=True, path="/", path_specified=True, secure=True,
+            expires=None, discard=True, comment=None, comment_url=None, rest={}))
+        return channel_profile(downloader.extract_info(
+            source + "?" + urlencode({"hl": language, "gl": region}), download=False))
 
 
 def save_channel_image(url, directory, name, timeout=20):

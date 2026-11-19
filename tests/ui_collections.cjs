@@ -7,8 +7,9 @@ const path = require('node:path');
 const {spawn} = require('node:child_process');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const channel = {id:'abc1230001',name:'Archive',source:null,overrides:{},profile:{}};
+const regionalChannel = {id:'abc1230005',name:'Regional',source:'https://www.youtube.com/@fixture',overrides:{},profile:{}};
 const playlist = {id:'abc1230002',name:'Collection'};
-const state = {channels:[channel],playlists:[playlist],counts:{},settings:{}};
+const state = {channels:[channel,regionalChannel],playlists:[playlist],counts:{},settings:{}};
 let videos = Array.from({length:65}, (_,i)=>({id:`item${String(i).padStart(7,'0')}`,title:`Video ${i}`,channel_id:channel.id,state:'ready'}));
 const requests = [];
 let pending = true;
@@ -18,13 +19,14 @@ const server = require('node:http').createServer((req,res)=>{
     const chunks=[];
     for await (const chunk of req) chunks.push(chunk);
     const data=chunks.length?JSON.parse(Buffer.concat(chunks)):null;
-    requests.push({method:req.method,path:url.pathname,data});
+    requests.push({method:req.method,path:url.pathname,data,locale:req.headers['x-gridtube-locale']});
     const send=(type,body)=>res.writeHead(200,{'Content-Type':type,'Content-Length':Buffer.byteLength(body)}).end(body);
     const json=value=>send('application/json',JSON.stringify(value));
-    if (url.pathname==='/') return send('text/html; charset=utf-8',fs.readFileSync('static/index.html'));
+    if (url.pathname==='/') return send('text/html; charset=utf-8',fs.readFileSync('static/index.html','utf8').replace('</head>',"<script>if(localStorage.getItem('gridtube.ui-test.detect')!=='1')localStorage.setItem('gridtube.locale','pt-BR')</script></head>"));
     if (url.pathname==='/static/app.js') return send('text/javascript; charset=utf-8',fs.readFileSync('static/app.js'));
     if (url.pathname==='/static/style.css') return send('text/css',fs.readFileSync('static/style.css'));
-    if (url.pathname==='/api/state') return json(state);
+    if (url.pathname==='/api/state') return json({...state,channels:state.channels.map(row=>row===regionalChannel?{...row,
+      profile:{description:req.headers['x-gridtube-locale']==='pt-BR'?'Seja bem-vindo ao meu arquivo.':'Welcome to my archive.',locale_available:true}}:row)});
     if (url.pathname==='/api/videos') {
       const scope=url.searchParams.get('scope')||'';
       const rows=scope.startsWith('channel:')?videos.filter(v=>v.channel_id===scope.slice(8)):videos;
@@ -93,8 +95,11 @@ async function run() {
     await click('[data-action=clearSelection]');
     assert.equal(await evaluate('document.querySelector(".selection-toolbar").hidden'),true);
     await click('[data-value="channel:abc1230001"]');
-    await until(()=>evaluate('Boolean(document.querySelector("[data-action=deleteChannel]"))'),'Channel actions unavailable');
-    await click('[data-action=deleteChannel]');
+    await until(()=>evaluate('Boolean(document.querySelector("[data-action=edit]"))'),'Channel actions unavailable');
+    assert.equal(await evaluate('Boolean(document.querySelector("#library [data-action=deleteChannel]"))'),false);
+    await click('[data-action=edit]');
+    await evaluate('document.querySelector("#simple [name=name]").value=""');
+    await click('dialog [data-action=deleteChannel]');
     await until(()=>evaluate('Boolean(document.querySelector("#remove-bulk"))'),'Deletion preview unavailable');
     assert.equal(await evaluate('document.querySelector("#remove-bulk").textContent.includes("65")'),true);
     assert.equal(await evaluate('document.querySelector("#remove-bulk").textContent.includes("outras playlists")'),true);
@@ -136,6 +141,7 @@ async function run() {
     await click('[data-action=organize]');
     assert.equal(await evaluate('Boolean(document.querySelector("#new-channel,#new-playlist"))'),false);
     await evaluate('const channelSelect=document.querySelector("#move select");channelSelect.value="__new__";channelSelect.dispatchEvent(new Event("change"))');
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog [data-action=deleteChannel]"))'),false);
     await evaluate('document.querySelector("#simple [name=name]").value="New channel";document.querySelector("#simple button[type=submit]").click()');
     await until(()=>evaluate('!document.querySelector("dialog").open'),'Create and move did not finish');
     assert.equal(requests.filter(r=>r.path.endsWith('/move')).at(-1).data.channel,'abc1230003');
@@ -163,7 +169,23 @@ async function run() {
     await click('#remove-bulk [value=keep]');
     await until(()=>evaluate('!document.querySelector("dialog").open'),'Playlist deletion did not finish');
     assert.equal(requests.find(r=>r.method==='DELETE'&&r.path==='/api/playlists/'+playlist.id).data.disk,false);
-    console.log('Chromium verified: hidden selection controls, native right-click selection, last-item deselection, mobile menu entry, page and Shift selection, cross-page bulk deletion, cancellation polling, collection previews, unified creation, danger colors and mobile layout.');
+    await click('[data-value="channel:abc1230005"]');
+    await until(()=>evaluate('document.querySelector(".channel-description")?.textContent.includes("Seja bem-vindo")'),'PT-BR channel bio unavailable');
+    await evaluate('document.querySelector("#language").value="en";document.querySelector("#language").dispatchEvent(new Event("change"))');
+    await until(()=>evaluate('document.querySelector(".channel-description")?.textContent.includes("Welcome")'),'English channel bio unavailable');
+    assert.ok(requests.some(r=>r.path==='/api/state'&&r.locale?.startsWith('en-')));
+    await evaluate('document.querySelector("#language").value="pt-BR";document.querySelector("#language").dispatchEvent(new Event("change"))');
+    await until(()=>evaluate('document.querySelector(".channel-description")?.textContent.includes("Seja bem-vindo")'),'PT-BR bio not restored after switching back');
+    assert.equal(await evaluate('Boolean(document.querySelector("#library [data-action=deleteChannel]"))'),false);
+    await click('[data-action=edit]');
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog [data-action=deleteChannel]"))'),true);
+    await cdp('Page.enable');
+    await cdp('Page.addScriptToEvaluateOnNewDocument',{source:"Object.defineProperty(navigator,'languages',{get:()=>['en-GB']});Object.defineProperty(navigator,'language',{get:()=> 'en-GB'})"});
+    await evaluate("localStorage.setItem('gridtube.ui-test.detect','1');localStorage.removeItem('gridtube.locale');localStorage.removeItem('untube.locale')");
+    await cdp('Page.reload',{ignoreCache:true});
+    await until(()=>evaluate('document.documentElement.lang==="en"&&document.querySelector("#language")?.value==="en"'),'Browser language was not selected on first visit');
+    await until(()=>requests.filter(r=>r.path==='/api/state').at(-1)?.locale==='en-GB','Browser region not sent to the server');
+    console.log('Chromium verified: channel deletion inside editor, localized PT-BR/EN profiles, hidden selection controls, right-click selection, page and Shift selection, bulk deletion, unified creation, danger colors and mobile layout.');
     console.log('Screenshot:',screenshotPath);
   } finally {
     socket?.close();

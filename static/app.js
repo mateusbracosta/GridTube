@@ -311,7 +311,9 @@ const collectionIcons = [["folder","iconFolder"],["list","iconList"],["book","ic
 const get = id => document.getElementById(id);
 const app = get("app"), modal = get("modal"), notice = get("notice");
 const appName = "GridTube";
-let locale = (localStorage.getItem("gridtube.locale") ?? localStorage.getItem("untube.locale")) === "en" ? "en" : "pt-BR";
+const browserLanguages = navigator.languages?.length ? navigator.languages : [navigator.language];
+const preferredLanguage = browserLanguages.find(value=>/^(pt|en)(-|$)/i.test(value)) || "pt-BR";
+let locale = (localStorage.getItem("gridtube.locale") ?? localStorage.getItem("untube.locale") ?? preferredLanguage).toLowerCase().startsWith("en") ? "en" : "pt-BR";
 let state = {channels:[],playlists:[],counts:{},settings:{}};
 let scope = "", search = "", page = 1, lastRequest = 0, prior = "", displayed = [];
 const selectedVideos = new Map();
@@ -319,6 +321,8 @@ let selectionContext = "", lastSelectedVideo = null;
 let catalog = null, flashTimer;
 let watchCleanup = null, watchVideo = null, routeRequest = 0;
 let stateRequest = 0, lastRefresh = -Infinity, backgroundRefreshPending = false;
+const profileRequestTimes = new Map();
+let pendingLocalizedProfile = null;
 history.scrollRestoration = "manual";
 const t = key => translations[key]?.[Number(locale === "en")] || key;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
@@ -340,7 +344,11 @@ const btn = (action, text, glyph, css="", value="") => {
 async function api(path, method="GET", data) {
   const payload = data instanceof FormData ? {body:data} : data===undefined ? {} :
     {headers:{"Content-Type":"application/json"},body:JSON.stringify(data)};
-  const res = await fetch(`/api${path}`, {method,cache:"no-store",...payload});
+  const regionalLanguage = browserLanguages.find(value=>/^[a-z]{2,3}(?:-[a-z]{4})?-[a-z]{2}$/i.test(value));
+  const region = regionalLanguage?.split("-").at(-1).toUpperCase() || "US";
+  const metadataLocale = locale==="pt-BR" ? "pt-BR" : `en-${region}`;
+  const headers = {...payload.headers,"X-GridTube-Locale":metadataLocale,"Accept-Language":metadataLocale};
+  const res = await fetch(`/api${path}`, {method,cache:"no-store",...payload,headers});
   if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || "error");
   return res.json();
 }
@@ -371,6 +379,7 @@ function shell() {
     localStorage.setItem("gridtube.locale", locale);
     notice.textContent = "";
     shell();
+    refresh().catch(error=>flash(t(error.message)));
   };
   get("search").oninput = debounced(() => {
     const query = get("search").value;
@@ -531,7 +540,8 @@ async function refresh() {
 async function backgroundRefresh(force=false) {
   if (document.hidden || modal.open || watchPath() || backgroundRefreshPending) return;
   const busy = state.counts.queued || state.counts.running || state.counts.cancelling;
-  const delay = busy && scope==="downloads" ? 1900 : busy || scope==="downloads" ? 3500 : 15000;
+  const profileBusy = pendingLocalizedProfile && pendingLocalizedProfile.until>performance.now();
+  const delay = busy && scope==="downloads" ? 1900 : busy || scope==="downloads" || profileBusy ? 3500 : 15000;
   if (!force && performance.now()-lastRefresh<delay) return;
   backgroundRefreshPending = true;
   try { await refresh(); }
@@ -560,7 +570,7 @@ async function loadLibrary() {
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
     const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
-    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}${btn("deleteChannel",t("deleteChannel"),"trash","flat",channel.id)}` : "";
+    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
     const home = !scope && !search && page===1, hero = home && videos[0];
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
       ${hero?.thumbnail?`<img src="${asset(hero.id,hero.thumbnail)}" alt="">`:'<div class="art" aria-hidden="true"></div>'}
@@ -578,6 +588,14 @@ async function loadLibrary() {
     closeSelectionMenu();
     get("library").innerHTML = head + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
     updateSelection();
+    if (channel?.source&&!channel.profile?.locale_available) {
+      const key=`${channel.id}:${locale}`;
+      if ((profileRequestTimes.get(key)??-Infinity)<performance.now()-600000) {
+        profileRequestTimes.set(key,performance.now());
+        pendingLocalizedProfile={key,until:performance.now()+45000};
+        api(`/channels/${channel.id}/profile`,"POST",{}).catch(()=>{});
+      }
+    } else pendingLocalizedProfile=null;
   } catch (error) {
     if (id===lastRequest) { prior=""; get("library").textContent=t(error.message); }
   }
@@ -974,6 +992,8 @@ function editChannel(channel, videoId) {
     }
     await finish();
   });
+  if (channel) get("simple").insertAdjacentHTML("afterend",`<div class="dialog-body channel-delete-action">
+    ${btn("deleteChannel",t("deleteChannel"),"trash","",channel.id)}</div>`);
 }
 function collectionFields(collection, fallback="list") {
   const style = collection?.appearance || {icon:fallback,color:"#bebebe"};
@@ -1655,7 +1675,10 @@ async function act(action,value) {
       });break;
     case "localChannel": editChannel();break;
     case "edit": editChannel(channelOf(value));break;
-    case "profile": await api(`/channels/${value}/profile`,"POST");flash(t("queuedState"));break;
+    case "profile":
+      await api(`/channels/${value}/profile`,"POST",{force:true});
+      pendingLocalizedProfile={key:`${value}:${locale}`,until:performance.now()+45000};
+      flash(t("queuedState"));break;
     case "browse": {
       const channel = channelOf(value);
       try { await api(scanURL(channel.source)); }

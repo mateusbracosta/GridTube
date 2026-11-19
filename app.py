@@ -26,6 +26,20 @@ import dependencies
 import playlist_files
 
 
+def requested_profile_locale():
+    value = request.headers.get("X-GridTube-Locale") or request.accept_languages.best_match(
+        ["pt-BR", "pt", "en-US", "en-GB", "en-IN", "en"])
+    return collector.profile_locale(value)
+
+
+def localized_profile(profile, locale):
+    variants = profile.get("localizations", {})
+    variant = variants.get(locale, {})
+    return {**{key: value for key, value in profile.items() if key != "localizations"},
+            **{key: value for key, value in variant.items() if value is not None and value != ""},
+            "requested_locale": locale, "locale_available": bool(variant)}
+
+
 DEFAULTS = {"download_mode": "compact", "quality": "720", "shorts": "include", "audio": "original",
             "subtitles": "both", "auto_subtitles": True}
 CHOICES = {"download_mode": {"compact", "original"},
@@ -215,6 +229,9 @@ class Archive:
         self.titles = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-title")
         self.origin_lock = threading.Lock()
         self.origin_attempts = {}
+        self.profile_lock = threading.Lock()
+        self.profile_attempts = {}
+        self.profile_fetching = set()
         self.files_lock = threading.Lock()
         with self.db() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -645,7 +662,8 @@ class Archive:
                            (str(exc)[-400:], source, playlist))
                 system_event(db, "catalog", "catalog_failed", exc, "error")
 
-    def save_profile(self, source, profile):
+    def save_profile(self, source, profile, locale="pt-BR"):
+        locale = collector.profile_locale(locale)
         key = hashlib.sha256(source.encode()).hexdigest()
         directory = self.branding / key
         directory.mkdir(parents=True, exist_ok=True)
@@ -661,15 +679,46 @@ class Archive:
                 filename = previous.get(name)
             profile[name] = filename or previous.get(name)
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute("SELECT profile FROM channel_profile WHERE source=?", (source,)).fetchone()
+            latest = json.loads(old["profile"]) if old else {}
+            variants = latest.get("localizations", {})
+            text = {name: profile.get(name) for name in ("name", "description", "handle", "channel_id")}
+            if not text["description"] and variants.get(locale, {}).get("description"):
+                text["description"] = variants[locale]["description"]
+            variants[locale] = text
+            common = {**latest, **profile} if locale == "pt-BR" or not latest else latest
+            for name in ("avatar", "banner"):
+                common[name] = profile.get(name) or latest.get(name)
+            common["localizations"] = variants
             db.execute("""INSERT INTO channel_profile VALUES (?,?,?) ON CONFLICT(source) DO UPDATE
                           SET profile=excluded.profile, asset_key=excluded.asset_key""",
-                       (source, encode(profile), key))
+                       (source, encode(common), key))
 
-    def refresh_profile(self, source):
+    def refresh_profile(self, source, locale="pt-BR"):
         try:
-            self.save_profile(source, collector.fetch_channel_profile(source))
+            self.save_profile(source, collector.fetch_channel_profile(source, locale), locale)
         except Exception:
             logging.warning("Could not refresh channel profile for %s", source, exc_info=True)
+
+    def schedule_profile(self, source, locale, force=False):
+        locale = collector.profile_locale(locale)
+        key = (source, locale)
+        with self.profile_lock:
+            if key in self.profile_fetching or (not force and self.profile_attempts.get(key, 0) > time.monotonic()):
+                return False
+            self.profile_attempts[key] = time.monotonic() + 600
+            self.profile_fetching.add(key)
+
+        def fetch():
+            try:
+                self.refresh_profile(source, locale)
+            finally:
+                with self.profile_lock:
+                    self.profile_fetching.discard(key)
+
+        self.catalog.submit(fetch)
+        return True
 
     def backfill_profiles(self):
         with self.db() as db:
@@ -1505,7 +1554,7 @@ def library_video(row, db, profiles=None, summary=False):
             profiles = {}
         if source not in profiles:
             result = db.execute("SELECT profile FROM channel_profile WHERE source=?", (source,)).fetchone()
-            profiles[source] = json.loads(result["profile"]) if result else None
+            profiles[source] = localized_profile(json.loads(result["profile"]), requested_profile_locale()) if result else None
         profile = profiles[source]
         if profile:
             meta["source_profile"] = {"name": profile.get("name")} if summary else profile
@@ -1594,7 +1643,7 @@ def create_app(data=None, root=None, workers=True):
                      LEFT JOIN channel_style s ON c.id=s.id ORDER BY c.name COLLATE NOCASE"""):
                 channel = dict(row)
                 channel["overrides"] = json.loads(row["overrides"])
-                channel["profile"] = json.loads(row["profile"]) if row["profile"] else {}
+                channel["profile"] = localized_profile(json.loads(row["profile"]), requested_profile_locale()) if row["profile"] else {}
                 style = {"icon": channel.pop("icon") or "folder", "color": channel.pop("color") or "#bebebe"}
                 channel["appearance"] = None if channel["source"] else style
                 channels.append(channel)
@@ -1850,12 +1899,14 @@ def create_app(data=None, root=None, workers=True):
 
     @app.post("/api/channels/<channel_id>/profile")
     def refresh_channel_profile(channel_id):
+        check_origin()
         with archive.db() as db:
             row = archive.channel(db, channel_id)
         if not row["source"]:
             abort(404)
-        archive.catalog.submit(archive.refresh_profile, row["source"])
-        return jsonify(ok=True), 202
+        data = body() if request.is_json else {}
+        queued = archive.schedule_profile(row["source"], requested_profile_locale(), data.get("force") is True)
+        return jsonify(ok=True, queued=queued), 202
 
     @app.get("/source-branding/<video_id>/<asset>")
     def source_image(video_id, asset):
