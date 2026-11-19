@@ -99,6 +99,8 @@ const translations = {
   deleteChannel: ["Excluir canal e vídeos","Delete channel and videos"],
   deletePlaylist: ["Excluir playlist e vídeos","Delete playlist and videos"],
   selectVideo: ["Selecionar vídeo","Select video"],
+  deselectVideo: ["Desmarcar vídeo","Deselect video"],
+  moreOptions: ["Mais opções","More options"],
   selectPage: ["Selecionar esta página","Select this page"],
   deleteSelected: ["Excluir selecionados","Delete selected"],
   selectedVideos: ["vídeos selecionados","videos selected"],
@@ -407,6 +409,7 @@ function openWatch(id) {
   showLocation(true);
 }
 async function showLocation(autoplay=false, restore=false) {
+  closeSelectionMenu();
   const request = ++routeRequest;
   const id = watchPath();
   const main = get("library");
@@ -572,6 +575,7 @@ async function loadLibrary() {
     const results = videos.length
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
       : `<p class="empty">${t(search?"emptyCatalog":isQueue?"noJobs":"nothing")}</p>`;
+    closeSelectionMenu();
     get("library").innerHTML = head + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
     updateSelection();
   } catch (error) {
@@ -579,18 +583,22 @@ async function loadLibrary() {
   }
 }
 function selectionCheckbox(v) {
-  return `<label class="video-select" title="${esc(t("selectVideo"))}"><input type="checkbox" data-select-video="${v.id}"
+  return `<label class="video-select" ${selectedVideos.size?"":"hidden"} title="${esc(t("selectVideo"))}"><input type="checkbox" data-select-video="${v.id}"
     aria-label="${esc(`${t("selectVideo")}: ${jobTitle(v)}`)}" ${selectedVideos.has(v.id)?"checked":""}></label>`;
 }
 function selectionToolbar() {
-  return `<div class="selection-toolbar" role="group" aria-label="${t("deleteSelected")}">
+  return `<div class="selection-toolbar" ${selectedVideos.size?"":"hidden"} role="group" aria-label="${t("deleteSelected")}">
     <label class="check"><input type="checkbox" id="select-page">${t("selectPage")}</label>
     <span id="selected-count" aria-live="polite"></span>
     ${btn("clearSelection",t("clearSelection"),"","flat")}${btn("deleteSelected",t("deleteSelected"),"trash","")}</div>`;
 }
 function selectionCount(count) { return `${count} ${t(count===1?"selectedVideoOne":"selectedVideos")}`; }
 function updateSelection() {
+  const active=selectedVideos.size>0;
+  const toolbar=get("library").querySelector(".selection-toolbar");
+  if (toolbar) toolbar.hidden=!active;
   document.querySelectorAll("[data-select-video]").forEach(input=>{
+    input.closest(".video-select").hidden=!active;
     input.checked=selectedVideos.has(input.dataset.selectVideo);
     input.closest("article").classList.toggle("selected",input.checked);
   });
@@ -601,6 +609,32 @@ function updateSelection() {
     const button=get("library").querySelector(`[data-action="${action}"]`);
     if (button) button.disabled=!selectedVideos.size;
   }
+}
+function closeSelectionMenu(restoreFocus=false) {
+  const menu=get("video-context-menu");
+  if (!menu) return;
+  const anchor=menu.returnFocus;
+  menu.remove();
+  if (restoreFocus&&anchor?.isConnected) anchor.focus({preventScroll:true});
+}
+function openSelectionMenu(item, anchor, point) {
+  closeSelectionMenu();
+  if (!item) return;
+  const menu=document.createElement("div");
+  menu.id="video-context-menu";
+  menu.className="video-context-menu";
+  menu.setAttribute("role","menu");
+  menu.setAttribute("aria-label",t("moreOptions"));
+  menu.innerHTML=btn("selectVideo",t(selectedVideos.has(item.id)?"deselectVideo":"selectVideo"),"list","flat",item.id);
+  menu.querySelector("button").setAttribute("role","menuitem");
+  menu.returnFocus=anchor;
+  document.body.append(menu);
+  const bounds=anchor.getBoundingClientRect(), box=menu.getBoundingClientRect();
+  const viewport=document.documentElement;
+  const left=point?.x??bounds.left, top=point?.y??bounds.bottom;
+  menu.style.left=`${Math.max(8,Math.min(left,viewport.clientWidth-box.width-8))}px`;
+  menu.style.top=`${Math.max(8,Math.min(top,viewport.clientHeight-box.height-8))}px`;
+  menu.querySelector("button").focus({preventScroll:true});
 }
 function card(v) {
   const length = duration(v.duration);
@@ -617,6 +651,7 @@ function job(v) {
   return `<article class="job" data-video-id="${v.id}">${selectionCheckbox(v)}<div><strong>${esc(jobTitle(v))}</strong><small>${t(v.state==="queued"?"queuedState":v.state)}</small>
     ${v.state==="running"?jobProgress(v):""}
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div><aside class="job-actions">
+      ${btn("selectionMenu",t("moreOptions"),"more","flat icon-only",v.id)}
       ${v.state==="failed"?`${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}`:""}
       ${v.state!=="cancelling"?btn("cancelDownload",t(v.state==="failed"?"removeDownload":"cancelDownload"),"close","flat",v.id):""}
     </aside></article>`;
@@ -633,6 +668,7 @@ function jobProgress(v) {
 function removedRow(v) {
   const missing = v.error === "external_media_missing";
   return `<article class="job" data-video-id="${v.id}">${selectionCheckbox(v)}<div><strong>${esc(v.title)}</strong>${missing?`<small>${t(v.error)}</small>`:""}</div><aside class="job-actions">
+    ${btn("selectionMenu",t("moreOptions"),"more","flat icon-only",v.id)}
     ${missing?btn("retry",t("downloadAgain"),"download","",v.id):""}
     ${btn("restoreVideo",t("restoreVideo"),"","",v.id)}${btn("removeVideo",t("deleteMedia"),"","flat",v.id)}</aside></article>`;
 }
@@ -828,6 +864,7 @@ async function runMaintenance(restart) {
   }
 }
 function dialog(title, html, css="") {
+  closeSelectionMenu();
   catalog = null;
   if (modal.open) modal.close();
   modal.className = css;
@@ -1500,6 +1537,7 @@ function organize(item) {
   if (!item) return;
   dialog(t("organize"),`<div class="dialog-body"><strong>${esc(item.title)}</strong>
     ${youtubeLink(item)}
+    ${!watchPath()?btn("selectVideo",t(selectedVideos.has(item.id)?"deselectVideo":"selectVideo"),"list","",item.id):""}
     <form id="move">${select("channel",t("move"),[...channels(t("unfiled")),["__new__",t("createChannelOption")]],item.channel_id||"")}
     <button>${t("move")}</button></form>
     <form id="add-to">${select("playlist",t("addTo"),[["",t("choosePlaylist")],...state.playlists.map(p=>[p.id,p.name]),["__new__",t("createPlaylistOption")]],"")}<button>${t("addTo")}</button></form>
@@ -1635,6 +1673,21 @@ async function act(action,value) {
     case "deletePlaylist": await confirmBulkRemove("playlist",value);break;
     case "deleteSelected": await confirmBulkRemove();break;
     case "clearSelection": selectedVideos.clear();updateSelection();break;
+    case "selectionMenu": {
+      const anchor=get("library").querySelector(`[data-action="selectionMenu"][data-value="${CSS.escape(value)}"]`);
+      if (anchor) openSelectionMenu(item,anchor);
+      break;
+    }
+    case "selectVideo":
+      if (item) {
+        if (selectedVideos.has(item.id)) selectedVideos.delete(item.id);
+        else selectedVideos.set(item.id,item);
+        lastSelectedVideo=item.id;
+        updateSelection();
+      }
+      closeSelectionMenu(true);
+      if (modal.open) modal.close();
+      break;
     case "unplaylist": await api(`/playlists/${scope.slice(9)}/videos/${value}`,"DELETE");await finish();break;
     case "watch": openWatch(value);break;
     case "organize": organize(item);break;
@@ -1683,6 +1736,26 @@ document.addEventListener("change",event=>{
   displayed.forEach(v=>event.target.checked?selectedVideos.set(v.id,v):selectedVideos.delete(v.id));
   updateSelection();
 });
+document.addEventListener("contextmenu",event=>{
+  if (modal.open||event.target.closest("input,textarea,select")) return;
+  const card=event.target.closest("#library [data-video-id]");
+  const item=card&&displayed.find(video=>video.id===card.dataset.videoId);
+  if (!item) return;
+  event.preventDefault();
+  const anchor=card.querySelector('[data-action="organize"],[data-action="selectionMenu"]');
+  const point=event.clientX||event.clientY?{x:event.clientX,y:event.clientY}:null;
+  openSelectionMenu(item,anchor,point);
+});
+document.addEventListener("pointerdown",event=>{
+  if (!event.target.closest("#video-context-menu")) closeSelectionMenu();
+});
+document.addEventListener("keydown",event=>{
+  if (!get("video-context-menu")) return;
+  if (event.key==="Escape") { event.preventDefault();closeSelectionMenu(true); }
+  else if (event.key==="Tab") closeSelectionMenu(true);
+});
+window.addEventListener("scroll",()=>closeSelectionMenu(),true);
+window.addEventListener("resize",()=>closeSelectionMenu());
 window.addEventListener("popstate",()=>showLocation(false,true));
 document.addEventListener("visibilitychange",()=>backgroundRefresh(true));
 document.addEventListener("input",event=>{

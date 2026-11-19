@@ -50,7 +50,7 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 
 Choose **Icon and color** when creating or editing a local channel. For playlists created in the app, use **Customize** in the playlist header. The choices appear in the sidebar and headers and are included in the catalog backup.
 
-Use the checkboxes on video cards and rows to select several items. **Select this page** marks the visible page; selections are kept as you move between pages. Shift-click selects a range on the current page. Changing the collection or search clears the selection. **Delete selected** lets you keep the files or erase them from disk.
+Right-click a video and choose **Select video**, or use the video's three-dot menu, to start selecting items. The selection bar and checkboxes appear after the first item is selected and disappear when the last item is deselected or the selection is cleared. **Select this page** marks the visible page; selections are kept as you move between pages. Shift-click selects a range on the current page. Changing the collection or search clears the selection. **Delete selected** lets you keep the files or erase them from disk.
 
 The channel and playlist headers offer **Delete channel and videos** and **Delete playlist and videos**. The confirmation includes all collection items, across all pages, and warns about videos shared with other playlists. Deleting a playlist's videos affects those same videos throughout the library. Keeping files moves videos to **Removed**; deleting a channel leaves restored videos in **Unfiled**. Downloads are stopped before deleting their files. The deleted collection itself is not retained.
 
