@@ -43,6 +43,10 @@ main{max-width:1610px;margin:auto;padding:30px clamp(18px,3.3vw,48px) 55px}
 .page-head,.section-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:17px}
 .page-head h1{font-size:clamp(24px,3vw,36px);letter-spacing:-.04em;margin-right:auto;overflow-wrap:anywhere}
 .section-head h2{font-size:20px;letter-spacing:-.025em;margin-right:auto}
+.content-tabs{display:flex;gap:8px;margin:0 0 20px;border-bottom:1px solid var(--edge);padding-bottom:12px}
+.content-tabs button{border-radius:8px;padding:8px 18px}
+.content-tabs button[aria-pressed=true],.content-tabs button[aria-pressed=true]:hover{background:var(--text);color:var(--bg);border-color:var(--text)}
+.new-badge{display:inline-block;width:fit-content;margin-top:5px;padding:2px 6px;border-radius:4px;background:#343434;color:#f5f5f5;font-size:11px;font-weight:700;line-height:1.4}
 .muted,small{color:var(--muted)}
 .empty{padding:28px 21px;line-height:1.6;background:var(--panel);border:1px dashed #3a3a3a;border-radius:var(--radius);color:var(--muted)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(225px,100%),1fr));gap:23px 18px}

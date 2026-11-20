@@ -377,10 +377,14 @@ def audio_label(path, reported, prefer_reported=False):
     return {"audio": display, "audio_reported": reported, "audio_file_language": tag, "audio_label_source": source}
 
 def video_metadata(info):
+    source = info.get("original_url") or info.get("webpage_url") or ""
+    kind = ("streams" if info.get("live_status") in {"was_live", "post_live"} or info.get("was_live")
+            else "shorts" if "/shorts/" in source else None)
     return {
         "title": info.get("title") or info["id"],
         "description": info.get("description") or "",
         "upload_date": info.get("upload_date") or info.get("release_date"),
+        "kind": kind,
         "source_channel": info.get("channel") or info.get("uploader"),
         "source_channel_id": info.get("channel_id") if source_channel_url(info.get("channel_id")) else None,
         "source_channel_url": source_channel_url(info.get("channel_id")),

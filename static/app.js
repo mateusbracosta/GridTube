@@ -266,7 +266,16 @@ const translations = {
   languageReported: ["Idioma informado pelo YouTube.","Language reported by YouTube."],
   subtitleDownload: ["Legenda","Subtitle"],
   trackAttention: ["Faixas com erro","Tracks with errors"],
-  streams: ["Transmissões","Livestreams"],
+  streams: ["Lives","Live streams"],
+  contentTabs: ["Tipo de conteúdo","Content type"],
+  newVideo: ["Novo","New"],
+  lives: ["Baixar lives automaticamente","Download live streams automatically"],
+  livesHelp: ["Controla o acompanhamento automático. Seleções manuais e links continuam disponíveis.","Controls channel monitoring. Manual selections and links remain available."],
+  interface: ["Interface","Interface"],
+  hideShorts: ["Nunca exibir Shorts","Never show Shorts"],
+  hideLives: ["Nunca exibir lives","Never show live streams"],
+  visibilityHelp: ["Salvo neste navegador. Oculta conteúdos e abas na biblioteca, canais, playlists e sugestões. Não exclui arquivos nem cancela downloads; a fila continua visível para gerenciá-los.","Saved in this browser. Hides content and tabs in the library, channels, playlists and suggestions. Files and downloads are unchanged; the queue remains visible for management."],
+  invalid_content_kind: ["Tipo de conteúdo inválido.","Invalid content type."],
   playlistFilter: ["Filtrar por playlist","Filter by playlist"],
   allPlaylists: ["Catálogo do canal","Channel catalog"],
   loadingPlaylists: ["Buscando playlists…","Loading playlists…"],
@@ -317,6 +326,9 @@ const preferredLanguage = browserLanguages.find(value=>/^(pt|en)(-|$)/i.test(val
 let locale = (localStorage.getItem("gridtube.locale") ?? localStorage.getItem("untube.locale") ?? preferredLanguage).toLowerCase().startsWith("en") ? "en" : "pt-BR";
 let state = {channels:[],playlists:[],counts:{},settings:{}};
 let scope = "", search = "", page = 1, lastRequest = 0, prior = "", displayed = [];
+let contentKind = "videos";
+let hideShorts = localStorage.getItem("gridtube.hideShorts")==="true";
+let hideLives = localStorage.getItem("gridtube.hideLives")==="true";
 const selectedVideos = new Map();
 let selectionContext = "", lastSelectedVideo = null;
 let catalog = null, flashTimer;
@@ -393,7 +405,7 @@ function watchPath() {
   return /^\/watch\/([A-Za-z0-9_-]{11})\/?$/.exec(location.pathname)?.[1];
 }
 function libraryView() {
-  return {scope,search,page,scroll:window.scrollY};
+  return {scope,search,page,contentKind,scroll:window.scrollY};
 }
 function rememberLibrary() {
   history.replaceState({library:libraryView()},"","/");
@@ -405,7 +417,7 @@ function disposeWatch() {
   app.querySelector(".shell")?.classList.remove("cinema");
 }
 function showLibrary(target, query="") {
-  scope=target; search=query; page=1;
+  scope=target; search=query; page=1; contentKind="videos";
   get("search").value=search;
   app.querySelector(".shell").classList.remove("menu");
   if (watchPath()) history.pushState({library:libraryView()},"","/");
@@ -433,6 +445,7 @@ async function showLocation(autoplay=false, restore=false) {
     const previous = restore && history.state?.library;
     if (previous) {
       ({scope,search,page}=previous);
+      contentKind=["videos","shorts","streams"].includes(previous.contentKind)?previous.contentKind:"videos";
       get("search").value=search;
     }
     document.title=appName;
@@ -459,16 +472,19 @@ async function showLocation(autoplay=false, restore=false) {
 }
 
 async function loadNext(item, player) {
-  const {videos} = await api("/videos?summary=1");
+  const query = new URLSearchParams({summary:"1"});
+  applyVisibility(query);
+  const {videos} = await api(`/videos?${query}`);
   const available = videos.filter(video=>video.id!==item.id);
   const preferred = item.channel_id ? available.filter(video=>video.channel_id===item.channel_id) : [];
   const next = [...preferred,...available.filter(video=>!preferred.includes(video))].slice(0,7);
-  if (get("player")!==player || !next.length) return;
+  if (get("player")!==player) return;
   const rail = get("watch-next");
+  if (!next.length) { rail.replaceChildren();rail.hidden=true;get("watch-layout").classList.remove("has-next");return; }
   rail.innerHTML = `<h2>${t("upNext")}</h2>`+next.map(v=>`<a class="next-card" href="/watch/${v.id}" data-action="watch" data-value="${v.id}">
     <span class="next-poster">${v.thumbnail?`<img src="${asset(v.id,v.thumbnail)}" alt="" loading="lazy">`:icon("play")}
     ${v.duration?`<span class="timed">${duration(v.duration)}</span>`:""}</span>
-    <span class="next-text"><strong>${esc(v.title)}</strong><small>${esc(originName(v))}</small></span>
+    <span class="next-text"><strong>${esc(v.title)}</strong><small>${esc(originName(v))}</small>${newBadge(v)}</span>
   </a>`).join("");
   rail.hidden = false;
   get("watch-layout").classList.add("has-next");
@@ -500,7 +516,7 @@ function channelPage(channel, actions) {
       ${description?`<details class="channel-description"><summary>${esc(description.split("\n")[0])}</summary><p>${esc(description)}</p></details>`:""}
       <div class="channel-actions">${actions}</div></div>
     </div>
-    </section><div class="section-head"><h2>${t("videos")}</h2></div>`;
+    </section>`;
 }
 function originName(video) {
   return video.source_profile?.name || video.source_channel || channelOf(video.channel_id)?.name || t("inbox");
@@ -555,27 +571,36 @@ function pages(current,total,size,action) {
   return `<div class="pages"><button type="button" data-action="${action}" data-value="${current-1}" ${current<=1?"disabled":""}>‹ ${t("prev")}</button>
     <span>${current} / ${max}</span><button type="button" data-action="${action}" data-value="${current+1}" ${current>=max?"disabled":""}>${t("next")} ›</button></div>`;
 }
+function visibleKinds() { return ["videos",...hideShorts?[]:["shorts"],...hideLives?[]:["streams"]]; }
+function applyVisibility(query) {
+  if (hideShorts) query.append("exclude_kind","shorts");
+  if (hideLives) query.append("exclude_kind","streams");
+}
 async function loadLibrary() {
   if (watchPath()) return;
   const id = ++lastRequest;
   const query = new URLSearchParams({summary:"1",scope,q:search,page,state:({downloads:"jobs",removed:"removed"})[scope]||"ready"});
+  const hasTabs = !scope || scope.startsWith("channel:");
+  if (!visibleKinds().includes(contentKind)) contentKind="videos";
+  if (hasTabs) query.set("kind",contentKind);
+  if (!["downloads","removed"].includes(scope)) applyVisibility(query);
   try {
     const {videos,total} = await api(`/videos?${query}`);
     if (id!==lastRequest) return;
     if (page>1 && !videos.length) { page=Math.max(1,Math.ceil(total/60)); return loadLibrary(); }
-    const signature = JSON.stringify([scope,search,page,videos,total,state.channels,state.playlists]);
+    const signature = JSON.stringify([scope,search,page,contentKind,hideShorts,hideLives,videos,total,state.channels,state.playlists]);
     if (prior===signature) return;
     prior=signature; displayed=videos;
-    const context = `${scope}\n${search}`;
+    const context = `${scope}\n${search}\n${hasTabs?contentKind:"all"}\n${hideShorts}\n${hideLives}`;
     if (selectionContext!==context) { selectedVideos.clear(); lastSelectedVideo=null; selectionContext=context; }
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
     const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
     const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
-    const home = !scope && !search && page===1, hero = home && videos[0];
+    const home = !scope && !search && page===1 && contentKind==="videos", hero = home && videos[0];
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
       ${hero?.thumbnail?`<img src="${asset(hero.id,hero.thumbnail)}" alt="">`:'<div class="art" aria-hidden="true"></div>'}
-      <div class="hero-content"><h1>${esc(hero?.title||t("title"))}</h1><p>${esc(hero?.source_channel||t(hero?"recent":"intro"))}</p>
+      <div class="hero-content">${hero?newBadge(hero):""}<h1>${esc(hero?.title||t("title"))}</h1><p>${esc(hero?.source_channel||t(hero?"recent":"intro"))}</p>
       ${hero?btn("watch",t("play"),"play","accent",hero.id):btn("addChannel",t("addChannel"),"plus","accent")}
       </div></section><div class="section-head"><h2>${t("recent")}</h2></div>` :
       channel ? channelPage(channel,actions) : `<div class="page-head"><h1 class="${playlist?"collection-title":""}">${playlist?collectionMark(playlist,"list","heading"):""}${esc(title)}</h1>${playlist?
@@ -587,7 +612,9 @@ async function loadLibrary() {
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
       : `<p class="empty">${t(search?"emptyCatalog":isQueue?"noJobs":"nothing")}</p>`;
     closeSelectionMenu();
-    get("library").innerHTML = head + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
+    const tabs = hasTabs ? `<nav class="content-tabs" aria-label="${t("contentTabs")}">${visibleKinds().map(kind=>
+      `<button type="button" data-action="contentKind" data-value="${kind}" aria-pressed="${contentKind===kind}">${t(kind)}</button>`).join("")}</nav>` : "";
+    get("library").innerHTML = head + tabs + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
     updateSelection();
     if (channel?.source&&!channel.profile?.locale_available) {
       const key=`${channel.id}:${locale}`;
@@ -655,12 +682,13 @@ function openSelectionMenu(item, anchor, point) {
   menu.style.top=`${Math.max(8,Math.min(top,viewport.clientHeight-box.height-8))}px`;
   menu.querySelector("button").focus({preventScroll:true});
 }
+function newBadge(v) { return v.is_new?`<span class="new-badge">${t("newVideo")}</span>`:""; }
 function card(v) {
   const length = duration(v.duration);
   return `<article class="card" data-video-id="${v.id}">${selectionCheckbox(v)}<a href="/watch/${v.id}" class="visual ${v.thumbnail?"":"no-thumb"}" data-action="watch" data-value="${v.id}" aria-label="${esc(`${t("play")} ${v.title}`)}">
     ${v.thumbnail?`<img src="${asset(v.id,v.thumbnail)}" alt="" loading="lazy">`:""}<span class="play">${icon("play")}</span>
     ${length?`<span class="timed">${length}</span>`:""}${v.position&&v.duration?`<progress max="${Number(v.duration)}" value="${Number(v.position)}"></progress>`:""}</a>
-    <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small></div>
+    <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small>${newBadge(v)}</div>
     ${btn("organize",t("organize"),"more","flat icon-only",v.id)}</div></article>`;
 }
 function jobTitle(v) {
@@ -696,10 +724,14 @@ function openSettings() {
   dialog(t("settings"),`<div class="dialog-body">
     <nav class="settings-tabs" aria-label="${t("settings")}">
       <button type="button" data-action="settingsTab" data-value="downloads" aria-pressed="true">${t("downloads")}</button>
+      <button type="button" data-action="settingsTab" data-value="interface" aria-pressed="false">${t("interface")}</button>
       <button type="button" data-action="settingsTab" data-value="system" aria-pressed="false">${t("system")}</button>
     </nav>
     <form id="settings-downloads" class="stack"><h3>${t("defaults")}</h3>${prefs(state.settings,false)}
       <p role="alert"></p><button class="accent" type="submit">${t("save")}</button></form>
+    <form id="settings-interface" class="stack" hidden><h3>${t("interface")}</h3>
+      ${checked("hideShorts",t("hideShorts"),hideShorts)}${checked("hideLives",t("hideLives"),hideLives)}
+      <p class="note">${t("visibilityHelp")}</p><p role="alert"></p><button class="accent" type="submit">${t("save")}</button></form>
     <div id="settings-system" class="stack" hidden>
       <section class="system-card"><h3>${t("backupTitle")}</h3><p class="note">${t("backupHelp")}</p>
         <div class="system-actions"><a class="accent" href="/api/system/backup" download>${t("exportBackup")}</a>
@@ -725,6 +757,15 @@ function openSettings() {
       <section class="system-card"><h3>${t("activityLog")}</h3><div id="system-events"></div></section>
     </div></div>`);
   bind("settings-downloads",async data=>{await api("/settings","PUT",readPrefs(data));await finish();});
+  bind("settings-interface",async data=>{
+    hideShorts=data.has("hideShorts");hideLives=data.has("hideLives");
+    localStorage.setItem("gridtube.hideShorts",String(hideShorts));localStorage.setItem("gridtube.hideLives",String(hideLives));
+    page=1;prior="";
+    if (!visibleKinds().includes(contentKind)) contentKind="videos";
+    if (!watchPath()) rememberLibrary();
+    await finish();
+    if (watchVideo&&get("player")) await loadNext(watchVideo,get("player"));
+  });
   bind("library-check-form",async ()=>{
     const output = get("library-check-result");
     output.textContent = "";
@@ -798,6 +839,7 @@ async function applySystemChange(path, data) {
 
 function settingsTab(panel) {
   get("settings-downloads").hidden = panel!=="downloads";
+  get("settings-interface").hidden = panel!=="interface";
   get("settings-system").hidden = panel!=="system";
   for (const tab of modal.querySelectorAll('[data-action="settingsTab"]')) {
     tab.setAttribute("aria-pressed",String(tab.dataset.value===panel));
@@ -917,17 +959,18 @@ function prefs(values,local,{single=false,inherited={},inheritLabel=t("inherit")
     download_mode:[["compact",t("compact")],["original",t("originalQuality")]],
     quality:["360","480","720","1080","1440","2160","best"].map(q=>[q,q==="best"?t(q):`${q}p`]),
     shorts:["include","exclude","only"].map(k=>[k,t(k)]),
+    lives:[["include",t("yes")],["exclude",t("no")]],
     audio:[["original",t("original")],["pt-BR","Português (Brasil)"],["en","English"]],
     subtitles:[["none",t("none")],["pt-BR","Português (Brasil)"],["en","English"],["both",t("both")]],
     auto_subtitles:[["true",t("yes")],["false",t("no")]]
   };
-  if (single) delete choices.shorts;
+  if (single) { delete choices.shorts;delete choices.lives; }
   return `<div class="cols">${Object.entries(choices).map(([key,items])=>{
     const inheritedChoice = items.find(([value])=>value===String(inherited[key]))?.[1];
     const inheritedOption = inheritedChoice ? `${inheritLabel} · ${inheritedChoice}` : inheritLabel;
     return select(`pref_${key}`,t(key==="auto_subtitles"?"autoSub":key),
       local?[["",inheritedOption],...items]:items,String(values[key]??""));
-  }).join("")}</div><small class="note">${t("resolutionHelp")}</small>`;
+  }).join("")}</div><small class="note">${t("resolutionHelp")}${single?"":` ${t("livesHelp")}`}</small>`;
 }
 function readPrefs(data) {
   return Object.fromEntries([...data].filter(([k,v])=>k.startsWith("pref_")&&v!=="")
@@ -1180,6 +1223,7 @@ function languageName(code) {
 
 function watch(item, initialJobs=[], autoplay=false) {
   watchVideo = item;
+  if (item.is_new) api(`/videos/${item.id}/opened`,"POST",{}).catch(error=>flash(t(error.message)));
   const chapters = (item.chapters||[]).map(c=>btn("seek",`${duration(c.start_time)||"0:00"} · ${c.title}`,"","",Number(c.start_time))).join(" ");
   const theater = (localStorage.getItem("gridtube.theater") ?? localStorage.getItem("untube.theater")) === "true";
   app.querySelector(".shell").classList.toggle("cinema",theater);
@@ -1664,6 +1708,9 @@ async function act(action,value) {
       if (history.state?.watchFromApp) history.back(); else showLibrary("");
       break;
     case "page": page=Number(value);rememberLibrary();await loadLibrary();break;
+    case "contentKind":
+      if (!["videos","shorts","streams"].includes(value)) break;
+      contentKind=value;page=1;rememberLibrary();await loadLibrary();break;
     case "catalogMore": catalog.limit+=60;await pollCatalog(catalog);break;
     case "catalogAll": catalog.limit=catalog.total;await pollCatalog(catalog);break;
     case "scan": {

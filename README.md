@@ -50,6 +50,14 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 2. In the download options, choose the quality mode, preferred audio language, and subtitles. A channel can override global defaults, and a link can override either.
 3. Open a saved video from the library. Use the player gear to switch between saved tracks or discover additional tracks while online.
 
+The library and channel pages have **Videos**, **Shorts** and **Live streams** tabs. Videos is the default; open the other tabs to see those types. Returning from the player preserves the selected tab and page. Lists show the newest publication first, falling back to the capture date when the publication date is unavailable. Playlists and Unfiled keep all content types together.
+
+When channel monitoring downloads a newly discovered video automatically, its card shows **New** until you open it. Manual downloads and existing videos do not receive this badge. Opening clears it persistently for this shared library, even without starting playback.
+
+In **Settings → Downloads**, **Download live streams automatically** controls completed live recordings found by channel monitoring. Each channel can override the global choice. It defaults to Yes for existing installations; manual selections and links remain available. Changing the setting affects future monitoring, without cancelling queued downloads or fetching previously skipped streams.
+
+In **Settings → Interface**, **Never show Shorts** and **Never show live streams** hide their tabs and content across the library, channels, playlists, Unfiled, Continue watching and suggestions. These choices are saved in the current browser and do not affect downloads or files. Download and removal queues remain visible for management.
+
 **Downloads** shows the title of a queued video as soon as it is available, with the video ID while the title is unavailable. Progress shows the current phase and its percentage. The app uses transferred bytes for video and audio downloads, and the processed media duration reported by FFmpeg when assembling a file. It labels estimates and uses an indeterminate bar when progress cannot be measured.
 
 Choose **Icon and color** when creating or editing a local channel. For playlists created in the app, use **Customize** in the playlist header. The choices appear in the sidebar and headers and are included in the catalog backup.

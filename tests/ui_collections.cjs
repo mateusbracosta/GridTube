@@ -10,7 +10,9 @@ const channel = {id:'abc1230001',name:'Archive',source:null,overrides:{},profile
 const regionalChannel = {id:'abc1230005',name:'Regional',source:'https://www.youtube.com/@fixture',overrides:{},profile:{}};
 const playlist = {id:'abc1230002',name:'Collection'};
 const state = {channels:[channel,regionalChannel],playlists:[playlist],counts:{},settings:{download_mode:'compact',quality:'720'}};
-let videos = Array.from({length:65}, (_,i)=>({id:`item${String(i).padStart(7,'0')}`,title:`Video ${i}`,channel_id:channel.id,state:'ready'}));
+let videos = Array.from({length:65}, (_,i)=>({id:`item${String(i).padStart(7,'0')}`,title:`Video ${i}`,kind:'videos',is_new:i===0,channel_id:channel.id,state:'ready'}));
+videos.push({id:'short000001',title:'Short fixture',kind:'shorts',channel_id:channel.id,state:'ready'},
+  {id:'live0000001',title:'Live fixture',kind:'streams',channel_id:channel.id,state:'ready'});
 const requests = [];
 let pending = true;
 const server = require('node:http').createServer((req,res)=>{
@@ -28,12 +30,22 @@ const server = require('node:http').createServer((req,res)=>{
     if (url.pathname==='/static/icon.svg') return send('image/svg+xml',fs.readFileSync('static/icon.svg'));
     if (url.pathname==='/favicon.ico') return send('image/x-icon',fs.readFileSync('static/favicon.ico'));
     if (url.pathname==='/api/videos/item0000099/tracks') return json({video:{id:'item0000099',title:'Test video',filename:'main.mp4',state:'ready',duration:60},jobs:[]});
+    if (/^\/api\/videos\/[^/]+\/tracks$/.test(url.pathname)) {
+      const row=videos.find(v=>v.id===url.pathname.split('/')[3]);
+      return json({video:{...row,filename:'main.mp4',duration:60},jobs:[]});
+    }
+    if (url.pathname.endsWith('/opened')&&req.method==='POST') {
+      videos.find(v=>v.id===url.pathname.split('/')[3]).is_new=false;return json({ok:true});
+    }
     if (url.pathname==='/api/videos/item0000099/progress') return json({ok:true});
     if (url.pathname==='/api/state') return json({...state,channels:state.channels.map(row=>row===regionalChannel?{...row,
       profile:{description:req.headers['x-gridtube-locale']==='pt-BR'?'Seja bem-vindo ao meu arquivo.':'Welcome to my archive.',locale_available:true}}:row)});
     if (url.pathname==='/api/videos') {
       const scope=url.searchParams.get('scope')||'';
-      const rows=scope.startsWith('channel:')?videos.filter(v=>v.channel_id===scope.slice(8)):videos;
+      let rows=scope.startsWith('channel:')?videos.filter(v=>v.channel_id===scope.slice(8)):videos;
+      if(url.searchParams.has('kind')) rows=rows.filter(v=>v.kind===url.searchParams.get('kind'));
+      const excluded=url.searchParams.getAll('exclude_kind');
+      rows=rows.filter(v=>!excluded.includes(v.kind));
       const start=(Number(url.searchParams.get('page')||1)-1)*60;
       return json({videos:rows.slice(start,start+60),total:rows.length});
     }
@@ -89,6 +101,46 @@ async function run() {
     };
     const click=selector=>evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await until(()=>evaluate('document.querySelectorAll("[data-select-video]").length===60'),'Cards unavailable');
+    assert.equal(await evaluate('document.querySelector(".content-tabs [aria-pressed=true]").dataset.value'),'videos');
+    assert.equal(await evaluate('document.querySelectorAll(".card .new-badge").length'),1);
+    await click('[data-action=contentKind][data-value=shorts]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===1&&document.querySelector(".card").dataset.videoId==="short000001"'),'Shorts filter unavailable');
+    await click('.card [data-action=watch]');
+    await until(()=>evaluate('Boolean(document.querySelector("#player"))'),'Short player unavailable');
+    await click('[data-action=back]');
+    await until(()=>evaluate('document.querySelector(".content-tabs [aria-pressed=true]")?.dataset.value==="shorts"'),'Shorts tab not restored after watching');
+    await click('[data-action=contentKind][data-value=streams]');
+    await until(()=>evaluate('document.querySelector(".card")?.dataset.videoId==="live0000001"'),'Live filter unavailable');
+    await click('[data-value="channel:abc1230001"]');
+    await until(()=>evaluate('document.querySelector(".content-tabs [aria-pressed=true]")?.dataset.value==="videos"'),'Channel did not default to videos');
+    await click('[data-action=contentKind][data-value=shorts]');
+    await until(()=>evaluate('document.querySelector(".card")?.dataset.videoId==="short000001"'),'Channel shorts unavailable');
+    await click('[data-action=scope][data-value=""]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===60'),'Library did not default to videos');
+    await click('.card [data-action=watch][data-value=item0000000]');
+    await until(()=>requests.some(r=>r.path==='/api/videos/item0000000/opened'),'Opening did not clear the badge');
+    await click('[data-action=back]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===60&&!document.querySelector(".new-badge")'),'New badge did not disappear after opening');
+    await click('[data-action=settings]');
+    assert.equal(await evaluate('document.querySelector("[name=pref_lives]").closest("label").firstChild.textContent.trim()'),'Baixar lives automaticamente');
+    await click('[data-action=settingsTab][data-value=interface]');
+    await evaluate('document.querySelector("[name=hideShorts]").checked=true;document.querySelector("[name=hideLives]").checked=true;document.querySelector("#settings-interface button[type=submit]").click()');
+    await until(()=>evaluate('!document.querySelector("dialog").open&&document.querySelectorAll(".content-tabs button").length===1'),'Hide controls did not remove tabs');
+    await cdp('Page.reload',{ignoreCache:true});
+    await until(()=>evaluate('document.querySelectorAll(".card").length===60&&document.querySelectorAll(".content-tabs button").length===1'),'Visibility settings did not persist');
+    await click('[data-action=scope][data-value=inbox]');
+    await until(()=>evaluate('!document.querySelector(".hero")&&!document.querySelector(".content-tabs")&&document.querySelectorAll(".card").length===60'),'Mixed library visibility unavailable');
+    assert.equal(await evaluate('[...document.querySelectorAll(".card")].every(row=>row.dataset.videoId.startsWith("item"))'),true);
+    await click('[data-action=settings]');
+    await click('[data-action=settingsTab][data-value=interface]');
+    await evaluate('document.querySelector("[name=hideShorts]").checked=false;document.querySelector("#settings-interface button[type=submit]").click()');
+    await until(()=>evaluate('!document.querySelector("dialog").open'),'Visibility save did not finish');
+    await click('[data-action=scope][data-value=""]');
+    await until(()=>evaluate('document.querySelectorAll(".content-tabs button").length===2'),'Independent visibility controls failed');
+    await click('[data-action=settings]');
+    await click('[data-action=settingsTab][data-value=interface]');
+    await evaluate('document.querySelector("[name=hideLives]").checked=false;document.querySelector("#settings-interface button[type=submit]").click()');
+    await until(()=>evaluate('!document.querySelector("dialog").open&&document.querySelectorAll(".content-tabs button").length===3'),'Tabs were not restored');
     assert.equal(await evaluate('document.querySelector(".selection-toolbar").hidden'),true);
     assert.equal(await evaluate('[...document.querySelectorAll(".video-select")].every(label=>getComputedStyle(label).display==="none")'),true);
     await click('[data-action=settings]');
@@ -114,7 +166,7 @@ async function run() {
     await evaluate('document.querySelector("#simple [name=name]").value=""');
     await click('dialog [data-action=deleteChannel]');
     await until(()=>evaluate('Boolean(document.querySelector("#remove-bulk"))'),'Deletion preview unavailable');
-    assert.equal(await evaluate('document.querySelector("#remove-bulk").textContent.includes("65")'),true);
+    assert.equal(await evaluate('document.querySelector("#remove-bulk").textContent.includes("67")'),true);
     assert.equal(await evaluate('document.querySelector("#remove-bulk").textContent.includes("outras playlists")'),true);
     assert.equal(await evaluate('getComputedStyle(document.querySelector("#remove-bulk [value=disk]")).backgroundColor'),'rgb(174, 28, 50)');
     await click('[data-action=close]');
@@ -205,6 +257,7 @@ async function run() {
     await click('.mobile-brand');
     await until(()=>evaluate('Boolean(document.querySelector(".hero"))&&!document.querySelector(".channel-page")'),'Brand did not return to the library');
     assert.equal(await evaluate('window.gridtubeHomeMarker'),'same document');
+    assert.equal(await evaluate('document.querySelector(".content-tabs").getBoundingClientRect().right<=innerWidth'),true);
     await click('.mobile-brand');
     await until(()=>evaluate('window.gridtubeHomeMarker===undefined&&Boolean(document.querySelector(".hero"))'),'Brand did not reload the library page');
     assert.equal(await evaluate('document.querySelector(".mobile-brand .mark").getAttribute("src")'),'/static/icon.svg');
@@ -223,7 +276,7 @@ async function run() {
       const entry=6+index*16,size=ico[entry]||256,length=ico.readUInt32LE(entry+8),offset=ico.readUInt32LE(entry+12);
       assert.ok(offset+length<=ico.length);assert.equal(ico.readUInt32BE(offset+16),size);assert.equal(ico.readUInt32BE(offset+20),size);
     }
-    console.log('Chromium verified: brand navigation from channel/watch, full reload in library, new SVG and favicon sizes, channel editor, localized profiles, selection, bulk deletion and mobile layout.');
+    console.log('Chromium verified: content tabs and watch history, persistent independent visibility controls, live-download setting, New badge, brand navigation, localized profiles, selection, bulk deletion and mobile layout.');
     console.log('Screenshot:',screenshotPath);
   } finally {
     socket?.close();

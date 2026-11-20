@@ -8,6 +8,14 @@ Biblioteca de vídeos auto-hospedada para adquirir conteúdo quando há internet
 
 Clique no logo GridTube para voltar à biblioteca de outra tela. Se já estiver na biblioteca, o clique recarrega a página. O símbolo vermelho de grade e reprodução aparece no app e no favicon do navegador.
 
+A biblioteca e as páginas dos canais têm as abas **Vídeos**, **Shorts** e **Lives**, com Vídeos como padrão. Abra as outras abas para ver esses conteúdos. Ao voltar do player, a aba e a página são preservadas. As listas mostram a publicação mais recente primeiro; se a data estiver indisponível, usam a data da captura. Playlists e Avulsos continuam reunindo todos os tipos.
+
+Quando o acompanhamento de um canal baixa automaticamente um vídeo novo, o card mostra **Novo** até você abri-lo. Downloads manuais e vídeos já existentes ficam sem o selo. Abrir o vídeo remove o selo de forma persistente para esta biblioteca compartilhada, mesmo sem iniciar a reprodução.
+
+Em **Configurações → Downloads**, **Baixar lives automaticamente** controla as gravações de lives encontradas pelo acompanhamento dos canais. Cada canal pode substituir a escolha global. O padrão é Sim para preservar instalações existentes; seleções manuais e links continuam disponíveis. A mudança vale para o acompanhamento futuro, sem cancelar a fila nem buscar lives ignoradas anteriormente.
+
+Em **Configurações → Interface**, **Nunca exibir Shorts** e **Nunca exibir lives** ocultam suas abas e conteúdos na biblioteca, canais, playlists, Avulsos, Continuar assistindo e sugestões. As escolhas são salvas neste navegador e não afetam downloads ou arquivos. As filas de downloads e removidos continuam visíveis para gerenciamento.
+
 ## Rodar no Docker
 
 Com Git, Docker Engine e Compose instalados, clone o repositório e inicie o GridTube.
@@ -143,7 +151,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-image.tar gridtube:0.7.17
+docker save -o gridtube-image.tar gridtube:0.7.18
 docker load -i gridtube-image.tar
 docker compose up -d --no-build --pull never
 ~~~
