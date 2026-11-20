@@ -270,20 +270,26 @@ const translations = {
   contentTabs: ["Tipo de conteúdo","Content type"],
   newVideo: ["Novo","New"],
   lives: ["Lives","Live streams"],
-  allowCapture: ["Permitir","Allow"],
-  disableCapture: ["Não baixar","Do not download"],
-  livesHelp: ["Shorts e Lives controlam novos downloads por seleção, link e acompanhamento automático. Desativar não exclui arquivos já baixados.","Shorts and Live streams control new downloads from selections, links and channel monitoring. Disabling keeps existing files."],
+  includeLives: ["Permitir Lives","Allow live streams"],
+  excludeLives: ["Não baixar Lives","Do not download live streams"],
+  onlyLives: ["Somente Lives","Live streams only"],
+  livesHelp: ["Shorts e Lives controlam novos downloads por seleção, link e acompanhamento automático. Desativar não exclui arquivos já baixados. Se ambos estiverem em Somente, permite Shorts e Lives.","Shorts and Live streams control new downloads from selections, links and channel monitoring. Disabling keeps existing files. Setting both to Only allows Shorts and live streams."],
   shorts_disabled: ["O download de Shorts está desativado nas preferências globais ou deste canal.","Shorts downloads are disabled in global or channel preferences."],
   lives_disabled: ["O download de lives está desativado nas preferências globais ou deste canal.","Live stream downloads are disabled in global or channel preferences."],
   shorts_only: ["As preferências atuais permitem baixar somente Shorts.","Current preferences allow downloading Shorts only."],
+  lives_only: ["As preferências atuais permitem baixar somente Lives.","Current preferences allow downloading live streams only."],
+  selected_types_only: ["As preferências atuais permitem baixar somente Shorts e Lives.","Current preferences allow downloading Shorts and live streams only."],
   blockedDownloads: ["Bloqueados pelas preferências de download","Blocked by download preferences"],
-  maxDuration: ["Duração máxima para download (minutos)","Maximum download duration (minutes)"],
+  maxDuration: ["Duração máxima do vídeo (minutos)","Maximum video duration (minutes)"],
   autoDeleteDays: ["Excluir automaticamente do disco após (dias)","Automatically delete from disk after (days)"],
   newBadgeDays: ["Duração do selo Novo (dias)","New badge duration (days)"],
   noLimit: ["Sem limite","No limit"],
   never: ["Nunca","Never"],
   untilOpened: ["Até abrir o vídeo","Until the video is opened"],
-  durationHelp: ["Vazio ou 0: sem limite. Vale para seleção manual, links e acompanhamento automático.","Empty or 0: no limit. Applies to manual selections, links and channel monitoring."],
+  durationHelp: ["Vazio ou 0: sem limite. Filtra candidatos no catálogo e limita novos downloads; preserva o acervo já salvo.","Empty or 0: no limit. Filters catalog candidates and limits new downloads; saved videos are preserved."],
+  moveAction: ["Mover","Move"],
+  addAction: ["Adicionar","Add"],
+  downloadPreferencesHelp: ["Ajuda sobre downloads","Download preferences help"],
   autoDeleteHelp: ["Vazio ou 0: nunca. Um valor em dias apaga os vídeos e arquivos auxiliares do disco após o download. O padrão preserva tudo.","Empty or 0: never. A number of days deletes videos and sidecars from disk after downloading. The default keeps everything."],
   newBadgeHelp: ["Vazio ou 0: só desaparece ao abrir. Com um prazo, desaparece ao abrir ou ao completar os dias, o que vier primeiro.","Empty or 0: disappears only when opened. With a time limit, disappears when opened or when that many days pass, whichever comes first."],
   duration_limit_exceeded: ["O vídeo ultrapassa a duração máxima permitida para download.","The video exceeds the maximum allowed download duration."],
@@ -332,6 +338,7 @@ const translations = {
 };
 
 const paths = {
+  refresh:'<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11-1l3 6M4 12l3 6a7 7 0 0 0 11-1"/>',
   eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff:'<path d="m3 3 18 18M10 5a12 12 0 0 1 12 7 17 17 0 0 1-3 4M6 6a17 17 0 0 0-4 6s4 7 10 7a14 14 0 0 0 5-1M10 10a3 3 0 0 0 4 4"/>',
   play:'<path d="m8 5 12 7-12 7z" fill="currentColor" stroke="none"/>',
@@ -626,7 +633,7 @@ async function loadLibrary() {
   if (watchPath()) return;
   const id = ++lastRequest;
   const query = new URLSearchParams({summary:"1",scope,q:search,page,state:({downloads:"jobs",removed:"removed",continue:"ready",watched:"ready",ignored:"ready"})[scope]||"library"});
-  const hasTabs = !scope || scope.startsWith("channel:") || ["ignored","watched"].includes(scope);
+  const hasTabs = !["downloads","removed","continue"].includes(scope);
   if (!visibleKinds().includes(contentKind)) contentKind="videos";
   if (hasTabs) query.set("kind",contentKind);
   if (!["downloads","removed"].includes(scope)) applyVisibility(query);
@@ -647,7 +654,7 @@ async function loadLibrary() {
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
     const title = channel?.name || playlist?.name || t(({continue:"resume",ignored:"ignored",watched:"watched",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
-    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
+    const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"refresh","flat",channel.id):""}` : "";
     const home = !scope && !search && page===1 && contentKind==="videos", hero = home && videos.find(video=>video.state==="ready");
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
       ${hero?.thumbnail?`<img src="${asset(hero.id,hero.thumbnail)}" alt="">`:'<div class="art" aria-hidden="true"></div>'}
@@ -1034,7 +1041,7 @@ function prefs(values,local,{single=false,inherited={},inheritLabel=t("inherit")
     download_mode:[["compact",t("compact")],["original",t("originalQuality")]],
     quality:["360","480","720","1080","1440","2160","best"].map(q=>[q,q==="best"?t(q):`${q}p`]),
     shorts:["include","exclude","only"].map(k=>[k,t(k)]),
-    lives:[["include",t("allowCapture")],["exclude",t("disableCapture")]],
+    lives:[["include",t("includeLives")],["exclude",t("excludeLives")],["only",t("onlyLives")]],
     audio:[["original",t("original")],["pt-BR","Português (Brasil)"],["en","English"]],
     subtitles:[["none",t("none")],["pt-BR","Português (Brasil)"],["en","English"],["both",t("both")]],
     auto_subtitles:[["true",t("yes")],["false",t("no")]]
@@ -1046,12 +1053,13 @@ function prefs(values,local,{single=false,inherited={},inheritLabel=t("inherit")
   const numericFields=single?"":numericField("max_duration","maxDuration",durationDefault,t("durationHelp"))+
     (local?"":numericField("auto_delete_days","autoDeleteDays",t("never"),t("autoDeleteHelp"))+
       numericField("new_badge_days","newBadgeDays",t("untilOpened"),t("newBadgeHelp")));
-  return `<div class="cols">${Object.entries(choices).map(([key,items])=>{
+  return `<div class="cols prefs-grid">${Object.entries(choices).map(([key,items])=>{
     const inheritedChoice = items.find(([value])=>value===String(inherited[key]))?.[1];
     const inheritedOption = inheritedChoice ? `${inheritLabel} · ${inheritedChoice}` : inheritLabel;
     return select(`pref_${key}`,t(key==="auto_subtitles"?"autoSub":key),
       local?[["",inheritedOption],...items]:items,String(values[key]??""));
-  }).join("")}${numericFields}</div><small class="note">${t("resolutionHelp")}${single?"":` ${t("livesHelp")}`}</small>`;
+  }).join("")}${numericFields}</div>${single?`<small class="note">${t("resolutionHelp")}</small>`:
+    `<details class="prefs-help"><summary>${t("downloadPreferencesHelp")}</summary><p class="note">${t("resolutionHelp")} ${t("livesHelp")}</p></details>`}`;
 }
 function readPrefs(data) {
   return Object.fromEntries([...data].filter(([k,v])=>k.startsWith("pref_")&&v!=="")
@@ -1146,11 +1154,14 @@ function editPlaylist(playlist, videoId) {
 }
 function scanURL(source) { return `/scans?${new URLSearchParams({source})}`; }
 function catalogParams(session, mode={}) {
+  const local=get("catalog-form")?readPrefs(new FormData(get("catalog-form"))):{};
+  const policies={...state.settings,...session.channel?.overrides,...local};
   return new URLSearchParams({
     q:mode.whole?"":get("catalog-q").value,
     kind:mode.whole?"all":get("catalog-kind").value,
     playlist:mode.whole?"":get("catalog-playlist").value,
     rule:session.channel?.title_filter || get("catalog-rule")?.value || "",
+    channel:session.channel?.id||"",shorts:policies.shorts||"include",lives:policies.lives||"include",max_duration:policies.max_duration||0,
     limit:session.limit,...(mode.ids?{ids:"1"}:{})
   });
 }
@@ -1179,6 +1190,15 @@ function openCatalog(source,channel) {
   }
   get("catalog-q").oninput = debounced(changed);
   get("catalog-kind").onchange = changed;
+  for (const control of get("catalog-form").querySelectorAll('[name="pref_max_duration"],[name="pref_shorts"],[name="pref_lives"]')) {
+    control.onchange=async()=>{
+      try {
+        const {ids}=await api(`${scanURL(source)}&${catalogParams(session,{whole:true,ids:true})}`);
+        const allowed=new Set(ids);session.picks=new Set([...session.picks].filter(id=>allowed.has(id)));
+        session.limit=60;session.last="";await pollCatalog(session);selection();
+      } catch(error) {flash(t(error.message));}
+    };
+  }
   get("catalog-playlist").onchange = async () => {
     const playlist = get("catalog-playlist").value;
     session.limit=60;
@@ -1683,16 +1703,18 @@ function watch(item, initialJobs=[], autoplay=false) {
 
 function organize(item) {
   if (!item) return;
-  dialog(t("organize"),`<div class="dialog-body"><strong>${esc(item.title)}</strong>
+  dialog(t("organize"),`<div class="dialog-body"><strong class="organize-title">${esc(item.title)}</strong>
     ${youtubeLink(item)}
+    <div class="organize-quick">
     ${!watchPath()?btn("selectVideo",t(selectedVideos.has(item.id)?"deselectVideo":"selectVideo"),"list","",item.id):""}
     ${btn("markWatched",t(item.watched?"markUnwatched":"markWatched"),"eye","",item.id)}
     ${btn("ignoreVideo",t(item.ignored?"unignoreVideo":"ignoreVideo"),"eyeOff","",item.id)}
-    <form id="move">${select("channel",t("move"),[...channels(t("unfiled")),["__new__",t("createChannelOption")]],item.channel_id||"")}
-    <button>${t("move")}</button></form>
-    <form id="add-to">${select("playlist",t("addTo"),[["",t("choosePlaylist")],...state.playlists.map(p=>[p.id,p.name]),["__new__",t("createPlaylistOption")]],"")}<button>${t("addTo")}</button></form>
+    </div><form id="move">${select("channel",t("move"),[...channels(t("unfiled")),["__new__",t("createChannelOption")]],item.channel_id||"")}
+    <button>${t("moveAction")}</button></form>
+    <form id="add-to">${select("playlist",t("addTo"),[["",t("choosePlaylist")],...state.playlists.map(p=>[p.id,p.name]),["__new__",t("createPlaylistOption")]],"")}<button>${t("addAction")}</button></form>
+    <div class="organize-footer">
     ${scope.startsWith("playlist:")?btn("unplaylist",t("removeFrom"),"","flat",item.id):""}
-    ${btn("removeVideo",t("removeVideo"),"","flat",item.id)}</div>`);
+    ${btn("removeVideo",t("removeVideo"),"trash","flat",item.id)}</div></div>`,"organize-dialog");
   get("move").elements.channel.onchange=event=>{if(event.target.value==="__new__") editChannel(undefined,item.id);};
   get("add-to").elements.playlist.required=true;
   get("add-to").elements.playlist.onchange=event=>{if(event.target.value==="__new__") editPlaylist(undefined,item.id);};

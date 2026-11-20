@@ -387,14 +387,22 @@ def content_kind(info, fallback=None):
 
 
 def content_allowed(kind, prefs):
-    return ((kind != "streams" or prefs.get("lives", "include") == "include")
-            and (prefs.get("shorts", "include") == "include"
-                 or (kind == "shorts") == (prefs["shorts"] == "only")))
+    shorts, lives = prefs.get("shorts", "include"), prefs.get("lives", "include")
+    if kind == "shorts" and shorts == "exclude" or kind == "streams" and lives == "exclude":
+        return False
+    only = {name for name, mode in (("shorts", shorts), ("streams", lives)) if mode == "only"}
+    return not only or kind in only
 
 
 def require_content_allowed(kind, prefs):
     if not content_allowed(kind, prefs):
-        raise ValueError({"shorts": "shorts_disabled", "streams": "lives_disabled"}.get(kind, "shorts_only"))
+        if kind == "shorts" and prefs.get("shorts") == "exclude":
+            raise ValueError("shorts_disabled")
+        if kind == "streams" and prefs.get("lives") == "exclude":
+            raise ValueError("lives_disabled")
+        if prefs.get("lives") == "only":
+            raise ValueError("selected_types_only" if prefs.get("shorts") == "only" else "lives_only")
+        raise ValueError("shorts_only")
 
 
 def capture_allowed(kind, prefs, duration=None):

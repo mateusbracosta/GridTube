@@ -132,3 +132,23 @@ class DownloadPolicyTests(unittest.TestCase):
         response = self.client.post("/api/videos/item0000001/retry", json={})
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(self.item(1)["state"], "queued")
+
+    def test_live_only_policy_is_available_globally_and_for_channels(self):
+        self.settings(lives="only")
+        self.assertEqual(self.queue(1, "live/").json["queued"], 1)
+        self.assertEqual(self.queue(2, "shorts/").json["error"], "lives_only")
+        self.queue(3)
+        with patch("collector.read_video", return_value={"id": "item0000003", "title": "Regular", "media_type": "video"}), patch("collector.format_choice") as choose:
+            with self.assertRaisesRegex(ValueError, "lives_only"):
+                self.archive.capture(self.item(3))
+            choose.assert_not_called()
+        channel = self.client.post("/api/channels", json={"name": "Regular allowed", "overrides": {"lives": "include"}}).json["id"]
+        self.assertEqual(self.queue(4, "shorts/", channel).json["queued"], 1)
+
+    def test_both_only_modes_allow_shorts_and_lives_as_a_union(self):
+        prefs = {"shorts": "only", "lives": "only"}
+        self.assertTrue(collector.content_allowed("shorts", prefs))
+        self.assertTrue(collector.content_allowed("streams", prefs))
+        self.assertFalse(collector.content_allowed("videos", prefs))
+        with self.assertRaisesRegex(ValueError, "selected_types_only"):
+            collector.require_content_allowed("videos", prefs)

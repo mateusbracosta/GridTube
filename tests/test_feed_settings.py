@@ -194,3 +194,21 @@ class FeedSettingsTests(unittest.TestCase):
         self.assertTrue(row["watched"] and row["ignored"])
         prefs = restored.get("/api/state").json["settings"]
         self.assertEqual((prefs["max_duration"], prefs["new_badge_days"], prefs["auto_delete_days"]), (30, 5, 0))
+
+    def test_catalog_duration_cap_filters_lists_counts_and_all_result_selection(self):
+        source = "https://www.youtube.com/@catalogfixture"
+        with self.archive.db() as db:
+            db.execute("INSERT INTO scan(source,name,state) VALUES (?,?,'ready')", (source, "Catalog"))
+            db.executemany("INSERT INTO entry VALUES (?,?,?,?,?,?,?)", [
+                (source, f"cand{n:07d}", f"Candidate {n}", kind, duration, f"https://youtu.be/cand{n:07d}", n)
+                for n, kind, duration in ((1, "shorts", 60), (2, "videos", 180), (3, "streams", 60), (4, "videos", None), (5, "videos", 120))])
+        self.client.put("/api/settings", json={"max_duration": 2})
+        result = self.client.get("/api/scans", query_string={"source": source}).json
+        self.assertEqual(result["total"], 3)
+        self.assertEqual({e["id"] for e in result["entries"]}, {"cand0000001", "cand0000003", "cand0000005"})
+        ids = self.client.get("/api/scans", query_string={"source": source, "ids": 1}).json["ids"]
+        self.assertEqual(set(ids), {"cand0000001", "cand0000003", "cand0000005"})
+        channel = self.client.post("/api/channels", json={"source": source, "name": "Unlimited", "overrides": {"max_duration": 0}}).json["id"]
+        self.assertEqual(self.client.get("/api/scans", query_string={"source": source, "channel": channel}).json["total"], 5)
+        self.assertEqual(self.client.get("/api/scans", query_string={"source": source, "lives": "only"}).json["total"], 1)
+        self.assertEqual(self.client.get("/api/scans", query_string={"source": source, "max_duration": "bad"}).status_code, 400)

@@ -47,7 +47,7 @@ DEFAULTS = {"download_mode": "compact", "quality": "720", "shorts": "include", "
 NUMERIC_PREFS = {"max_duration", "auto_delete_days", "new_badge_days"}
 CHOICES = {"download_mode": {"compact", "original"},
            "quality": {"360", "480", "720", "1080", "1440", "2160", "best"},
-           "lives": {"include", "exclude"},
+           "lives": {"include", "exclude", "only"},
            "shorts": {"include", "exclude", "only"}, "audio": {"original", "pt-BR", "en"},
            "subtitles": {"none", "pt-BR", "en", "both"}}
 COLLECTION_ICONS = {"folder", "list", "book", "film", "music", "gamepad", "star", "compass", "tools"}
@@ -1985,12 +1985,31 @@ def create_app(data=None, root=None, workers=True):
             scan = db.execute("SELECT * FROM scan WHERE source=?", (source,)).fetchone()
             if not scan:
                 abort(404)
+            channel = archive.channel(db, request.args.get("channel"))
+            if channel and channel["source"] != source:
+                raise ValueError("invalid_channel")
+            policies = archive.effective(db, channel)
+            for name in ("shorts", "lives", "max_duration"):
+                if name in request.args:
+                    value = request.args[name]
+                    if name == "max_duration":
+                        try:
+                            value = int(value)
+                        except ValueError:
+                            raise ValueError("invalid_preferences") from None
+                    policies.update(preferences({name: value}, partial=True))
             playlist = (db.execute("SELECT * FROM source_playlist WHERE source=? AND id=?", (source,key)).fetchone()
                         if key else None)
             if key and not playlist:
                 abort(404)
             clause = "e.source=?"
             args = [source]
+            kinds = [kind for kind in ("videos", "shorts", "streams") if collector.content_allowed(kind, policies)]
+            clause += f" AND e.kind IN ({','.join('?' for _ in kinds)})"
+            args.extend(kinds)
+            if policies["max_duration"]:
+                clause += " AND e.duration IS NOT NULL AND e.duration<=?"
+                args.append(policies["max_duration"] * 60)
             for term in dict.fromkeys(map(collector.title_key, (query, rule))):
                 if term:
                     clause += " AND instr(title_key(e.title),?)>0"

@@ -50,9 +50,11 @@ Set `GRIDTUBE_PLAYBACK_CACHE_MIB=512` in `.env` if disk space is tight. The defa
 2. In the download options, choose the quality mode, preferred audio language, and subtitles. A channel can override global defaults, and a link can override either.
 3. Open a saved video from the library. Use the player gear to switch between saved tracks or discover additional tracks while online.
 
-The library and channel pages have **Videos**, **Shorts** and **Live streams** tabs. Videos is the default. Returning from the player preserves the tab, page and filters. **Newest first / Oldest first** uses the publication date, falling back to capture date; the order is saved in this browser. Playlists and Unfiled keep all content types together.
+The library, channels, Unfiled, playlists, Watched and Ignored have **Videos**, **Shorts** and **Live streams** tabs. Videos is the default. Returning from the player preserves the tab, page and filters. **Newest first / Oldest first** uses the publication date, falling back to capture date; the order is saved in this browser. Tabs filter the display without changing playlist memberships or files.
 
 Each content tab offers **All, New, Today, This week, Unwatched and In progress**. Filters can be combined to narrow results; All clears them. Today and This week use publication dates and the browser's local day, with the week starting on Monday. In progress includes waiting/active downloads and partially watched videos. All is the default and keeps watched videos visible.
+
+Channel actions, content tabs, filters and sorting share compact 32-pixel controls, consistent corners and small outline icons, with subdued selection colors.
 
 Selected downloads appear immediately as cards in the channel and library, with their title, thumbnail preview, queue state and measured progress. Errors appear on the card and in Downloads, with retry and trash controls. Pending thumbnail previews come from YouTube while online; completed videos use saved local thumbnails. No percentage is invented when progress cannot be measured.
 
@@ -62,7 +64,11 @@ When channel monitoring downloads a newly discovered video automatically, its ca
 
 In **Settings → Downloads**, **Shorts** and **Live streams** control all new captures: manual selections, links, retries and channel monitoring. Each channel can override the global choice. **Do not download** blocks that type without deleting existing videos, subtitles, audio tracks or progress. **Shorts only** also blocks regular videos and live recordings. Waiting jobs are checked again against current preferences before capture; blocked jobs show a reason and can be retried after changing the preference. Already running transfers are not forcibly cancelled. These download rules are separate from Interface visibility settings.
 
-**Maximum download duration (minutes)** defaults to **No limit** (empty or 0) and accepts a custom whole number. Channels can inherit the global limit or use 0 for no limit. **Automatically delete from disk after (days)** defaults to **Never** (empty or 0). A custom value permanently removes expired video bundles, sidecars and their catalog records, including ignored videos. Age starts at download completion; older archives without that timestamp use their capture date. Checks run periodically in batches and respect files being exported or prepared for playback. This setting is global; its activity and errors appear in System.
+Both selectors offer **Allow / Do not download / Only**, with explicit type names. **Live streams only** downloads just live recordings. If both types are set to Only, their union is allowed: Shorts and live recordings, without regular videos.
+
+**Maximum video duration (minutes)** defaults to **No limit** (empty or 0) and accepts a custom whole number. Channels can inherit the global limit or use 0 for no limit. **Automatically delete from disk after (days)** defaults to **Never** (empty or 0). A custom value permanently removes expired video bundles, sidecars and their catalog records, including ignored videos. Age starts at download completion; older archives without that timestamp use their capture date. Checks run periodically in batches and respect files being exported or prepared for playback. This setting is global; its activity and errors appear in System.
+
+The duration ceiling also filters the channel selection catalog, its counts and Select all results. With a ceiling active, candidates with unknown duration are omitted until it can be confirmed. Saved videos remain accessible. Download fields share aligned controls; optional explanatory text can be expanded under Download preferences help.
 
 In **Settings → Interface**, **Never show Shorts** and **Never show live streams** hide their tabs and content across the library, channels, playlists, Unfiled, Watched, Ignored and suggestions. These choices are saved in the current browser and do not affect downloads or files. Download and removal queues remain visible for management.
 

@@ -8,9 +8,11 @@ Biblioteca de vídeos auto-hospedada para adquirir conteúdo quando há internet
 
 Clique no logo GridTube para voltar à biblioteca de outra tela. Se já estiver na biblioteca, o clique recarrega a página. O símbolo vermelho de grade e reprodução aparece no app e no favicon do navegador.
 
-A biblioteca e as páginas dos canais têm as abas **Vídeos**, **Shorts** e **Lives**, com Vídeos como padrão. Voltar do player preserva aba, página e filtros. O seletor **Mais recentes primeiro / Mais antigos primeiro** usa a publicação, com fallback à captura, e salva a escolha neste navegador. Playlists e Avulsos continuam reunindo todos os tipos.
+Biblioteca, canais, Avulsos, playlists, Assistidos e Ignorados têm as abas **Vídeos**, **Shorts** e **Lives**, com Vídeos como padrão. Voltar do player preserva aba, página e filtros. O seletor **Mais recentes primeiro / Mais antigos primeiro** usa a publicação, com fallback à captura, e salva a escolha neste navegador. As abas filtram a exibição sem alterar vínculos de playlists ou arquivos.
 
 Em cada aba há **Todos, Novos, Hoje, Esta semana, Não assistidos e Em andamento**. Os filtros podem ser combinados para refinar o resultado; Todos limpa os demais. Hoje/Esta semana usam a publicação e a data local do navegador, com semana iniciando na segunda-feira. Em andamento reúne downloads aguardando/ativos e vídeos parcialmente assistidos. Todos é o padrão e mantém os assistidos visíveis.
+
+Ações do canal, abas, filtros e seletor de ordem usam controles compactos de 32 pixels, cantos consistentes e ícones de traço pequenos, com seleção discreta.
 
 Downloads selecionados aparecem imediatamente como cards no canal e na biblioteca, com título, prévia da capa, estado da fila e progresso medido. Erros aparecem no card e em Downloads, com repetir e lixeira para cancelar. A prévia dos pendentes vem do YouTube quando há internet; vídeos concluídos usam capas locais salvas. Não é inventada porcentagem quando a fase não permite medi-la.
 
@@ -20,7 +22,11 @@ Quando o acompanhamento de um canal baixa automaticamente um vídeo novo, o card
 
 Em **Configurações → Downloads**, **Shorts** e **Lives** controlam todas as novas capturas: seleção manual, link, nova tentativa e acompanhamento automático. Cada canal pode substituir a escolha global. **Não baixar** bloqueia aquele tipo sem excluir vídeos, legendas, áudios ou progresso já salvos. **Somente Shorts** também bloqueia vídeos comuns e lives. Itens aguardando na fila são conferidos com as preferências atuais antes de iniciar; os bloqueados mostram o motivo e podem ser tentados novamente após alterar a preferência. Transferências já iniciadas não são canceladas à força. As regras de download são independentes das opções de exibição em Interface.
 
-**Duração máxima para download (minutos)** começa em **Sem limite** (vazio ou 0) e aceita um número inteiro personalizado. O canal pode herdar o teto global ou usar 0 para não limitar. **Excluir automaticamente do disco após (dias)** começa em **Nunca** (vazio ou 0). Um valor personalizado apaga definitivamente bundles vencidos, arquivos auxiliares e seus registros no catálogo, inclusive vídeos ignorados. O prazo começa na conclusão do download; acervos antigos sem esse horário usam a data da captura. A conferência é periódica, em lotes, e respeita arquivos em exportação/preparação para reprodução. Essa configuração é global; atividades e falhas aparecem em Sistema.
+Os dois seletores oferecem **Permitir / Não baixar / Somente**, com o nome do tipo explícito. **Somente Lives** baixa apenas gravações de lives. Se os dois tipos estiverem em Somente, permite a união: Shorts e Lives, sem vídeos comuns.
+
+**Duração máxima do vídeo (minutos)** começa em **Sem limite** (vazio ou 0) e aceita um número inteiro personalizado. O canal pode herdar o teto global ou usar 0 para não limitar. **Excluir automaticamente do disco após (dias)** começa em **Nunca** (vazio ou 0). Um valor personalizado apaga definitivamente bundles vencidos, arquivos auxiliares e seus registros no catálogo, inclusive vídeos ignorados. O prazo começa na conclusão do download; acervos antigos sem esse horário usam a data da captura. A conferência é periódica, em lotes, e respeita arquivos em exportação/preparação para reprodução. Essa configuração é global; atividades e falhas aparecem em Sistema.
+
+O teto de duração também filtra o catálogo de seleção do canal, suas contagens e Selecionar todos os resultados. Com teto ativo, candidatos sem duração confirmada ficam fora até ser possível confirmá-la. Vídeos já salvos continuam acessíveis. Os campos de download têm controles alinhados; explicações adicionais podem ser abertas em Ajuda sobre downloads.
 
 Em **Configurações → Interface**, **Nunca exibir Shorts** e **Nunca exibir lives** ocultam suas abas e conteúdos na biblioteca, canais, playlists, Avulsos, Assistidos, Ignorados e sugestões. As escolhas são salvas neste navegador e não afetam downloads ou arquivos. As filas de downloads e removidos continuam visíveis para gerenciamento.
 
@@ -159,7 +165,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-image.tar gridtube:0.7.19
+docker save -o gridtube-image.tar gridtube:0.7.20
 docker load -i gridtube-image.tar
 docker compose up -d --no-build --pull never
 ~~~
