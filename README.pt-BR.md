@@ -12,7 +12,7 @@ Biblioteca, canais, Avulsos, playlists, Assistidos e Ignorados têm as abas **V�
 
 Em cada aba há **Todos, Novos, Hoje, Esta semana, Não assistidos e Em andamento**. Os filtros podem ser combinados para refinar o resultado; Todos limpa os demais. Hoje/Esta semana usam a publicação e a data local do navegador, com semana iniciando na segunda-feira. Em andamento reúne downloads aguardando/ativos e vídeos parcialmente assistidos. Todos é o padrão e mantém os assistidos visíveis.
 
-Ações do canal, abas, filtros e seletor de ordem usam controles compactos de 32 pixels, cantos consistentes e ícones de traço pequenos, com seleção discreta.
+Ações do canal, abas, filtros e seletor de ordem usam controles arredondados e compactos de 28 pixels, cantos consistentes e ícones de traço pequenos, com seleção discreta.
 
 Downloads selecionados aparecem imediatamente como cards no canal e na biblioteca, com título, prévia da capa, estado da fila e progresso medido. Erros aparecem no card e em Downloads, com repetir e lixeira para cancelar. A prévia dos pendentes vem do YouTube quando há internet; vídeos concluídos usam capas locais salvas. Não é inventada porcentagem quando a fase não permite medi-la.
 
@@ -165,7 +165,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-image.tar gridtube:0.7.20
+docker save -o gridtube-image.tar gridtube:0.7.21
 docker load -i gridtube-image.tar
 docker compose up -d --no-build --pull never
 ~~~

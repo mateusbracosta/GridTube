@@ -289,9 +289,10 @@ async function run() {
     assert.equal(requests.find(r=>r.method==='DELETE'&&r.path==='/api/playlists/'+playlist.id).data.disk,false);
     await click('[data-value="channel:abc1230005"]');
     await until(()=>evaluate('document.querySelector(".channel-description")?.textContent.includes("Seja bem-vindo")'),'PT-BR channel bio unavailable');
-    const controlSizes=await evaluate('[...document.querySelectorAll(".channel-actions button,.content-tabs button,.feed-filters button,.feed-filters select")].map(element=>({height:element.getBoundingClientRect().height,radius:getComputedStyle(element).borderRadius}))');
-    assert.ok(controlSizes.length>6&&controlSizes.every(value=>value.height===32&&value.radius==='8px'),JSON.stringify(controlSizes));
-    assert.equal(await evaluate('[...document.querySelectorAll(".channel-actions svg")].every(icon=>icon.getBoundingClientRect().width===15&&icon.getBoundingClientRect().height===15)'),true);
+    const controlSizes=await evaluate('[...document.querySelectorAll(".channel-actions button,.content-tabs button,.feed-filters button,.library-order")].map(element=>({height:element.getBoundingClientRect().height,radius:getComputedStyle(element).borderRadius}))');
+    assert.ok(controlSizes.length>6&&controlSizes.every(value=>value.height===28&&value.radius==='999px'),JSON.stringify(controlSizes));
+    assert.equal(await evaluate('[...document.querySelectorAll(".channel-actions svg")].every(icon=>icon.getBoundingClientRect().width===14&&icon.getBoundingClientRect().height===14)'),true);
+    assert.equal(await evaluate('Math.abs(document.querySelector(".content-tabs").getBoundingClientRect().top-document.querySelector("#library-order").getBoundingClientRect().top)<1'),true);
     const controlsScreenshot=await cdp('Page.captureScreenshot',{format:'png'});
     fs.writeFileSync(path.join(os.tmpdir(),'gridtube-controls-preview.png'),Buffer.from(controlsScreenshot.data,'base64'));
     await evaluate('document.querySelector("#language").value="en";document.querySelector("#language").dispatchEvent(new Event("change"))');
@@ -343,6 +344,7 @@ async function run() {
       {...base,id:'fail0000001',title:'Failed video',state:'failed',error:'lives_disabled'}];
     await click('[data-action=scope][data-value="channel:abc1230001"]');
     await until(()=>evaluate('document.querySelectorAll(".pending-card").length===3'),'Channel did not index pending cards');
+    assert.equal(await evaluate('Math.abs(document.querySelector(".content-tabs").getBoundingClientRect().top-document.querySelector(".feed-filters").getBoundingClientRect().top)<1&&Math.abs(document.querySelector(".content-tabs").getBoundingClientRect().top-document.querySelector("#library-order").getBoundingClientRect().top)<1'),true);
     assert.equal(await evaluate('document.querySelector(".pending-card.running").textContent.includes("16%")'),true);
     assert.equal(await evaluate('Boolean(document.querySelector(".pending-card.failed [data-action=retry]"))'),true);
     assert.equal(await evaluate('document.querySelector(".pending-card [data-action=cancelDownload]").classList.contains("danger")'),true);
@@ -394,6 +396,7 @@ async function run() {
     await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await click('[data-action=scope][data-value="channel:abc1230001"]');
     await until(()=>evaluate('Boolean(document.querySelector(".feed-filters"))'),'Mobile filters unavailable');
+    assert.equal(await evaluate('Math.abs(document.querySelector(".content-tabs").getBoundingClientRect().top-document.querySelector("#library-order").getBoundingClientRect().top)<1'),true);
     assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
     console.log('Chromium verified: pending channel cards/progress/retry/cancel, combined filters, saved sorting, numeric settings, watched/ignored workflows, tabs, visibility, localization, collections and mobile layout.');
     console.log('Screenshot:',screenshotPath);

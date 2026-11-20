@@ -675,8 +675,9 @@ async function loadLibrary() {
     const filters=!["downloads","removed"].includes(scope)?`<div class="feed-filters" role="group" aria-label="${t("combineFilters")}" title="${t("combineFilters")}">
       ${[["all","all"],["new","filterNew"],["today","filterToday"],["week","filterWeek"],["unwatched","filterUnwatched"],["progress","filterProgress"]].map(([value,label])=>
         `<button type="button" data-action="libraryFilter" data-value="${value}" aria-pressed="${value==="all"?!libraryFilters.size:libraryFilters.has(value)}">${t(label)}</button>`).join("")}
-      <select id="library-order" aria-label="${t("sortOrder")}">${["newest","oldest"].map(order=>option(order,t(order),sortOrder)).join("")}</select></div>`:"";
-    get("library").innerHTML = head + `<div class="library-filters">${tabs}${filters}</div>` + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
+      </div>`:"";
+    const order=filters?`<select id="library-order" class="library-order" aria-label="${t("sortOrder")}">${["newest","oldest"].map(value=>option(value,t(value),sortOrder)).join("")}</select>`:"";
+    get("library").innerHTML = head + (tabs||filters?`<div class="library-filters">${tabs}${filters}${order}</div>`:"") + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
     if (get("library-order")) get("library-order").onchange=async event=>{sortOrder=event.target.value;localStorage.setItem("gridtube.sort",sortOrder);page=1;rememberLibrary();await loadLibrary();};
     updateSelection();
     if (channel?.source&&!channel.profile?.locale_available) {

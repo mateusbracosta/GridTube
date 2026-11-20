@@ -54,7 +54,7 @@ The library, channels, Unfiled, playlists, Watched and Ignored have **Videos**, 
 
 Each content tab offers **All, New, Today, This week, Unwatched and In progress**. Filters can be combined to narrow results; All clears them. Today and This week use publication dates and the browser's local day, with the week starting on Monday. In progress includes waiting/active downloads and partially watched videos. All is the default and keeps watched videos visible.
 
-Channel actions, content tabs, filters and sorting share compact 32-pixel controls, consistent corners and small outline icons, with subdued selection colors.
+Channel actions, content tabs, filters and sorting share compact rounded 28-pixel controls, consistent corners and small outline icons, with subdued selection colors.
 
 Selected downloads appear immediately as cards in the channel and library, with their title, thumbnail preview, queue state and measured progress. Errors appear on the card and in Downloads, with retry and trash controls. Pending thumbnail previews come from YouTube while online; completed videos use saved local thumbnails. No percentage is invented when progress cannot be measured.
 
