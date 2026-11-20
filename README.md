@@ -2,6 +2,8 @@
 
 English · [Português do Brasil](README.pt-BR.md)
 
+[Latest release](https://github.com/mateusbracosta/GridTube/releases/latest)
+
 GridTube is a self-hosted video library for preserving YouTube videos and watching them offline. Download videos while connected, then browse and play your archive over your local network.
 
 - Browse a channel's videos, Shorts, live archives, and playlists before choosing what to download. Set a title rule and optionally follow new uploads.

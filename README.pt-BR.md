@@ -2,6 +2,8 @@
 
 [English](README.md) · Português do Brasil
 
+[Versão mais recente](https://github.com/mateusbracosta/GridTube/releases/latest)
+
 Biblioteca de vídeos auto-hospedada para adquirir conteúdo quando há internet e consultar o acervo pela rede local.
 
 Clique no logo GridTube para voltar à biblioteca de outra tela. Se já estiver na biblioteca, o clique recarrega a página. O símbolo vermelho de grade e reprodução aparece no app e no favicon do navegador.
