@@ -59,7 +59,7 @@ class CancellationTests(unittest.TestCase):
         class StopWorker(Exception):
             pass
 
-        def download(url, prefs, inputs, bundle, progress, *, on_title, cancel=None):
+        def download(url, prefs, inputs, bundle, progress, *, on_title, cancel=None, kind=None, check_policy=None):
             if url.endswith(first):
                 (inputs / "partial.mp4.part").write_bytes(b"partial")
                 transferring.set()

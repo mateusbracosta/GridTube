@@ -14,6 +14,7 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -41,7 +42,9 @@ def localized_profile(profile, locale):
 
 
 DEFAULTS = {"download_mode": "compact", "quality": "720", "shorts": "include", "audio": "original",
-            "subtitles": "both", "auto_subtitles": True, "lives": "include"}
+            "subtitles": "both", "auto_subtitles": True, "lives": "include",
+            "max_duration": 0, "auto_delete_days": 0, "new_badge_days": 0}
+NUMERIC_PREFS = {"max_duration", "auto_delete_days", "new_badge_days"}
 CHOICES = {"download_mode": {"compact", "original"},
            "quality": {"360", "480", "720", "1080", "1440", "2160", "best"},
            "lives": {"include", "exclude"},
@@ -54,6 +57,15 @@ PUBLICATION_DATE = """COALESCE(CASE WHEN typeof(json_extract(metadata,'$.upload_
     AND json_extract(metadata,'$.upload_date') NOT GLOB '*[^0-9]*'
     THEN json_extract(metadata,'$.upload_date') END,strftime('%Y%m%d',created,'unixepoch'))"""
 PUBLICATION_ORDER = f"{PUBLICATION_DATE} DESC,created DESC,video.id DESC"
+DOWNLOAD_DATE = """CASE WHEN json_type(metadata,'$.downloaded_at') IN ('integer','real')
+    AND json_extract(metadata,'$.downloaded_at')>0 THEN json_extract(metadata,'$.downloaded_at') ELSE created END"""
+
+
+def publication_order(value):
+    if value not in {"newest", "oldest"}:
+        raise ValueError("invalid_sort")
+    return PUBLICATION_ORDER if value == "newest" else PUBLICATION_ORDER.replace("DESC", "ASC")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), prefs TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS system_event (
@@ -82,7 +94,8 @@ CREATE TABLE IF NOT EXISTS video (
     pending_folder TEXT, pending_channel TEXT, percent INTEGER DEFAULT 0, error TEXT,
     progress_phase TEXT, progress_estimated INTEGER NOT NULL DEFAULT 0,
     position REAL DEFAULT 0, watched_at INTEGER, created INTEGER NOT NULL,
-    unopened_auto INTEGER NOT NULL DEFAULT 0
+    unopened_auto INTEGER NOT NULL DEFAULT 0, watched INTEGER NOT NULL DEFAULT 0,
+    ignored INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS playlist_item (
     playlist_id TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
@@ -133,6 +146,12 @@ SCHEMA += f"""
 CREATE INDEX IF NOT EXISTS video_publication ON video(state,{PUBLICATION_DATE} DESC,created DESC,id DESC);
 CREATE INDEX IF NOT EXISTS video_kind_publication ON video(state,kind,{PUBLICATION_DATE} DESC,created DESC,id DESC);
 CREATE INDEX IF NOT EXISTS video_channel_kind_publication ON video(state,channel_id,kind,{PUBLICATION_DATE} DESC,created DESC,id DESC);
+CREATE INDEX IF NOT EXISTS video_watched_publication ON video(state,watched,{PUBLICATION_DATE} DESC,created DESC,id DESC);
+CREATE INDEX IF NOT EXISTS video_ignored ON video(ignored,state);
+DROP INDEX IF EXISTS video_download_age;
+CREATE INDEX IF NOT EXISTS video_download_order ON video(state,{DOWNLOAD_DATE},id);
+CREATE INDEX IF NOT EXISTS video_library_kind ON video(ignored,kind,{PUBLICATION_DATE} DESC,created DESC,id DESC,state);
+CREATE INDEX IF NOT EXISTS video_library_channel ON video(ignored,channel_id,kind,{PUBLICATION_DATE} DESC,created DESC,id DESC,state);
 """
 
 
@@ -149,7 +168,11 @@ def preferences(data, partial=False):
             raise ValueError("invalid_preferences")
         if partial and value is None:
             continue
-        if key == "auto_subtitles":
+        if partial and key in {"auto_delete_days", "new_badge_days"}:
+            raise ValueError("invalid_preferences")
+        if key in NUMERIC_PREFS:
+            valid = type(value) is int and 0 <= value <= 1000000
+        elif key == "auto_subtitles":
             valid = type(value) is bool
         else:
             valid = isinstance(value, str) and value in CHOICES[key]
@@ -161,7 +184,7 @@ def preferences(data, partial=False):
 
 def capture_preferences(data):
     overrides = preferences(data, partial=True)
-    if {"shorts", "lives"} & overrides.keys():
+    if {"shorts", "lives", *NUMERIC_PREFS} & overrides.keys():
         raise ValueError("invalid_preferences")
     return overrides
 
@@ -179,7 +202,7 @@ def checked_rule(value):
 
 
 def allowed(kind, mode, lives="include"):
-    return (kind != "streams" or lives == "include") and (mode == "include" or (kind == "shorts") == (mode == "only"))
+    return collector.content_allowed(kind, {"shorts": mode, "lives": lives})
 
 
 def valid_selection(items):
@@ -250,8 +273,15 @@ class Archive:
         self.profile_attempts = {}
         self.profile_fetching = set()
         self.files_lock = threading.Lock()
+        self.next_retention_check = 0
         with self.db() as db:
             db.execute("PRAGMA journal_mode=WAL")
+            # Add fields referenced by new indexes before running the full schema.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='video'").fetchone():
+                columns = {row["name"] for row in db.execute("PRAGMA table_info(video)")}
+                for column in ("watched", "ignored"):
+                    if column not in columns:
+                        db.execute(f"ALTER TABLE video ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
             db.executescript(SCHEMA)
             if "title_filter" not in {row["name"] for row in db.execute("PRAGMA table_info(channel)")}:
                 db.execute("ALTER TABLE channel ADD COLUMN title_filter TEXT NOT NULL DEFAULT ''")
@@ -281,6 +311,7 @@ class Archive:
                           WHERE state='failed' AND (lower(error) LIKE '%unable to download video subtitles%'
                             OR error LIKE '%Postprocessing: Conversion failed!%')""")
         self.apply_pending_maintenance()
+        self.expire_badges()
         self.refresh_playlist_files()
 
     @contextmanager
@@ -308,10 +339,10 @@ class Archive:
     def defaults(self, db):
         return {**DEFAULTS, **json.loads(db.execute("SELECT prefs FROM settings").fetchone()["prefs"])}
 
-    def playlist_rows(self, db, playlist_id):
+    def playlist_rows(self, db, playlist_id, sort="newest"):
         return db.execute(f"""SELECT video.id,video.folder,video.metadata FROM playlist_item p
             JOIN video ON video.id=p.video_id WHERE p.playlist_id=? AND video.state='ready'
-            ORDER BY {PUBLICATION_ORDER}""", (playlist_id,)).fetchall()
+            ORDER BY {publication_order(sort)}""", (playlist_id,)).fetchall()
 
     @staticmethod
     def playlist_asset(bundle, filename):
@@ -358,7 +389,7 @@ class Archive:
                 "SELECT playlist_id FROM playlist_item WHERE video_id=?", (video_id,))]
         self.refresh_playlist_files(ids)
 
-    def export_playlist(self, playlist_id):
+    def export_playlist(self, playlist_id, sort="newest"):
         with self.files_lock, self.db() as db:
             if self.pending_maintenance.exists():
                 raise ValueError("maintenance_pending")
@@ -366,7 +397,7 @@ class Archive:
             if not playlist:
                 abort(404)
             paths, files, ids = [], [], []
-            for row in self.playlist_rows(db, playlist_id):
+            for row in self.playlist_rows(db, playlist_id, sort):
                 bundle = self.video_bundle(row)
                 meta = json.loads(row["metadata"])
                 video = self.playlist_asset(bundle, meta["filename"])
@@ -427,6 +458,10 @@ class Archive:
         return False
 
     def validate_backup_video(self, row):
+        if type(row["ignored"]) is not int or row["ignored"] not in {0, 1}:
+            raise ValueError("backup_invalid")
+        if type(row["watched"]) is not int or row["watched"] not in {0, 1}:
+            raise ValueError("backup_invalid")
         if type(row["unopened_auto"]) is not int or row["unopened_auto"] not in {0, 1}:
             raise ValueError("backup_invalid")
         if collector.youtube_url(row["url"], "video")[1] != row["id"]:
@@ -593,16 +628,21 @@ class Archive:
                    (channel_id, name, folder, source, encode(overrides or {}), int(auto), title_filter))
         return self.channel(db, channel_id)
 
-    def enqueue(self, db, entry, channel, prefs, capture_overrides=None, automatic=False):
+    def enqueue(self, db, entry, channel, prefs, capture_overrides=None, automatic=False, defer_kind=False):
+        if not defer_kind:
+            collector.require_capture_allowed(entry["kind"], prefs,
+                                             entry["duration"] if "duration" in entry.keys() else None)
         rule = prefs.get("title_filter")
         if (rule and entry["title"] not in {entry["url"], entry["id"]}
                 and collector.title_key(rule) not in collector.title_key(entry["title"])):
             return 0
         cursor = db.execute(
-            """INSERT INTO video (id,url,title,channel_id,kind,prefs,capture_overrides,state,created,unopened_auto)
-               VALUES (?,?,?,?,?,?,?,'queued',?,?) ON CONFLICT(id) DO NOTHING""",
+            """INSERT INTO video (id,url,title,channel_id,kind,prefs,capture_overrides,metadata,state,created,unopened_auto)
+               VALUES (?,?,?,?,?,?,?,?,'queued',?,?) ON CONFLICT(id) DO NOTHING""",
             (entry["id"], entry["url"], entry["title"], channel["id"] if channel else None,
-             entry["kind"], encode(prefs), encode(capture_overrides or {}), timestamp(), int(automatic)))
+             entry["kind"], encode(prefs), encode(capture_overrides or {}),
+             encode({"duration": entry["duration"]}) if "duration" in entry.keys() else None,
+             timestamp(), int(automatic)))
         return cursor.rowcount
 
     def backfill_download_titles(self):
@@ -1087,7 +1127,52 @@ class Archive:
                 self.sync_channels()
             except Exception:
                 logging.exception("Subscription loop failed")
+            try:
+                self.expire_badges()
+                if timestamp() >= self.next_retention_check:
+                    self.expire_videos()
+            except Exception:
+                logging.exception("Retention check failed")
             time.sleep(20)
+
+    @staticmethod
+    def downloaded_at(row, meta=None):
+        meta = meta if meta is not None else json.loads(row["metadata"] or "{}")
+        value = meta.get("downloaded_at")
+        return value if type(value) in (int, float) and value > 0 else row["created"]
+
+    def expire_badges(self):
+        with self.db() as db:
+            days = self.defaults(db)["new_badge_days"]
+            if not days:
+                return
+            cutoff = timestamp() - days * 86400
+            db.execute(f"""UPDATE video SET unopened_auto=0 WHERE state='ready' AND unopened_auto=1
+                AND {DOWNLOAD_DATE}<=?""", (cutoff,))
+
+    def expire_videos(self):
+        now = timestamp()
+        self.next_retention_check = now + 600
+        with self.db() as db:
+            days = self.defaults(db)["auto_delete_days"]
+            if not days:
+                return 0
+            expired = [row["id"] for row in db.execute(f"""SELECT id FROM video WHERE state='ready'
+                AND {DOWNLOAD_DATE}<=? ORDER BY {DOWNLOAD_DATE},id LIMIT 100""", (now - days * 86400,))]
+        removed = 0
+        for video_id in expired:
+            try:
+                self.remove_video(video_id, True)
+                removed += 1
+            except (ValueError, OSError) as exc:
+                with self.db() as db:
+                    system_event(db, "library", "retention_failed", f"{video_id} · {exc}", "error")
+        if removed:
+            with self.db() as db:
+                system_event(db, "library", "retention_deleted", str(removed))
+        if len(expired) == 100:
+            self.next_retention_check = now + 20
+        return removed
 
     def finish_publish(self, db, row):
         target = self.video_bundle({"folder": row["pending_folder"], "id": row["id"]})
@@ -1199,6 +1284,22 @@ class Archive:
         video_id = item["id"]
         last_progress, last_write = (None, None, False), float("-inf")
 
+        def check_policy(kind, info):
+            with self.db() as db:
+                current = db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+                prefs = self.effective(db, self.channel(db, current["channel_id"]))
+                meta = {**collector.video_metadata(info), "kind": kind, "duration": info.get("duration")}
+                db.execute("UPDATE video SET kind=?,metadata=?,title=? WHERE id=? AND state IN ('queued','running','failed')",
+                           (kind, encode(meta), meta["title"], video_id))
+            collector.require_capture_allowed(kind, prefs, info.get("duration"), require_duration=True)
+
+        with self.db() as db:
+            current = db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+            policy = self.effective(db, self.channel(db, current["channel_id"]))
+        if item["kind"] in {"shorts", "streams"}:
+            collector.require_content_allowed(item["kind"], policy)
+        prefs = {**json.loads(item["prefs"]), **{key: policy[key] for key in ("shorts", "lives", "max_duration")}}
+
         def progress(phase, percent=None, estimated=False):
             nonlocal last_progress, last_write
             self.check_capture_cancelled()
@@ -1218,9 +1319,9 @@ class Archive:
             bundle = Path(scratch) / "bundle"
             bundle.mkdir()
             progress("prepare")
-            meta = collector.download(item["url"], json.loads(item["prefs"]), inputs, bundle, progress,
+            meta = collector.download(item["url"], prefs, inputs, bundle, progress,
                                       on_title=lambda title: self.remember_download_title(video_id, title),
-                                      cancel=self.check_capture_cancelled)
+                                      cancel=self.check_capture_cancelled, kind=item["kind"], check_policy=check_policy)
             progress("publish")
             collector.write_manifest(bundle, meta)
             with self.files_lock:
@@ -1622,8 +1723,12 @@ class Archive:
         self.changed.set()
 
 
-def library_video(row, db, profiles=None, summary=False):
+def library_video(row, db, profiles=None, summary=False, new_badge_days=None):
     meta = json.loads(row["metadata"]) if row["metadata"] else {}
+    if new_badge_days is None:
+        new_badge_days = json.loads(db.execute("SELECT prefs FROM settings WHERE id=1").fetchone()[0]).get("new_badge_days", 0)
+    is_new = (row["state"] == "ready" and bool(row["unopened_auto"])
+              and (not new_badge_days or Archive.downloaded_at(row, meta) > timestamp() - new_badge_days * 86400))
     source = meta.get("source_channel_url")
     if summary:
         meta = {key: meta[key] for key in ("duration", "thumbnail", "upload_date", "source_channel") if key in meta}
@@ -1638,7 +1743,9 @@ def library_video(row, db, profiles=None, summary=False):
             meta["source_profile"] = {"name": profile.get("name")} if summary else profile
     if row["state"] != "ready":
         meta["capture_overrides"] = json.loads(row["capture_overrides"])
-    return {**meta, "is_new": row["state"] == "ready" and bool(row["unopened_auto"]), **{key: row[key] for key in
+        if row["state"] in {"queued", "running", "failed", "cancelling"}:
+            meta["preview_thumbnail"] = f"https://i.ytimg.com/vi/{row['id']}/hqdefault.jpg"
+    return {**meta, "is_new": is_new, "watched": bool(row["watched"]), "ignored": bool(row["ignored"]), **{key: row[key] for key in
                       ("id", "title", "url", "channel_id", "kind", "state", "position",
                        "percent", "progress_phase", "progress_estimated", "error", "watched_at", "created")}}
 
@@ -1737,6 +1844,8 @@ def create_app(data=None, root=None, workers=True):
         prefs = preferences(body())
         with archive.db() as db:
             db.execute("UPDATE settings SET prefs=? WHERE id=1", (encode(prefs),))
+        archive.next_retention_check = 0
+        archive.expire_badges()
         return jsonify(prefs)
 
     @app.get("/api/system")
@@ -1931,14 +2040,17 @@ def create_app(data=None, root=None, workers=True):
                     raise ValueError("invalid_description")
                 db.execute("INSERT INTO channel_description VALUES (?,?)", (channel["id"], description.strip()))
             prefs = archive.effective(db, channel)
-            queued = 0
+            queued = blocked = 0
             for item in dict.fromkeys(selected):
                 entry = db.execute("SELECT * FROM entry WHERE source=? AND id=?", (source, item)).fetchone()
                 if entry is None:
                     raise ValueError("invalid_selection")
+                if not collector.capture_allowed(entry["kind"], prefs, entry["duration"]):
+                    blocked += 1
+                    continue
                 queued += archive.enqueue(db, entry, channel, prefs)
         archive.changed.set()
-        return jsonify(id=channel["id"], queued=queued), 201
+        return jsonify(id=channel["id"], queued=queued, blocked=blocked), 201
 
     @app.put("/api/channels/<channel_id>")
     def update_channel(channel_id):
@@ -2020,26 +2132,36 @@ def create_app(data=None, root=None, workers=True):
         with archive.files_lock, archive.db() as db:
             channel = archive.channel(db, channel_id)
             prefs = archive.effective(db, channel)
-            count = 0
+            count = blocked = 0
             for item in dict.fromkeys(selected):
                 entry = db.execute("SELECT * FROM entry WHERE source=? AND id=?", (channel["source"], item)).fetchone()
                 if not entry:
                     raise ValueError("invalid_selection")
+                if not collector.capture_allowed(entry["kind"], prefs, entry["duration"]):
+                    blocked += 1
+                    continue
                 count += archive.enqueue(db, entry, channel, prefs)
         archive.changed.set()
-        return jsonify(queued=count)
+        return jsonify(queued=count, blocked=blocked)
 
     @app.post("/api/downloads")
     def queue_url():
         data = body()
         url, video_id = collector.youtube_url(data.get("url"), "video")
         overrides = capture_preferences(data.get("overrides", {}))
-        kind = "shorts" if "/shorts/" in url else "videos"
+        kind = "shorts" if "/shorts/" in url else "streams" if "/live/" in data.get("url", "") else "videos"
         with archive.files_lock, archive.db() as db:
             channel = archive.channel(db, data.get("channel"))
             prefs = {**archive.effective(db, channel), **overrides}
+            existing = db.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+            if existing and existing["state"] in {"ready", "queued", "running", "cancelling"}:
+                return jsonify(id=video_id, queued=0)
+            if existing and existing["kind"] in {"shorts", "streams"}:
+                kind = existing["kind"]
+            if kind in {"shorts", "streams"}:
+                collector.require_content_allowed(kind, prefs)
             queued = archive.enqueue(db, {"id": video_id, "url": url, "title": video_id, "kind": kind},
-                                     channel, prefs, overrides)
+                                     channel, prefs, overrides, defer_kind=kind == "videos")
             if not queued:
                 queued = db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,
                     progress_phase=NULL,progress_estimated=0,title=CASE WHEN title=url THEN id ELSE title END,url=?,kind=?,
@@ -2070,9 +2192,17 @@ def create_app(data=None, root=None, workers=True):
         excluded = set(request.args.getlist("exclude_kind"))
         if not excluded <= {"shorts", "streams"}:
             raise ValueError("invalid_content_kind")
-        states = {"jobs": ("queued", "running", "failed", "cancelling"), "removed": ("removed",)}.get(state, ("ready",))
+        filters = set(request.args.getlist("filter"))
+        if not filters <= {"new", "today", "week", "unwatched", "progress"}:
+            raise ValueError("invalid_filter")
+        states = {"jobs": ("queued", "running", "failed", "cancelling"), "removed": ("removed",),
+                  "library": ("ready", "queued", "running", "failed", "cancelling")}.get(state, ("ready",))
         params = list(states)
         where = f"state IN ({','.join('?' for _ in states)})"
+        if scope == "ignored":
+            where += " AND ignored=1"
+        elif state not in {"jobs", "removed"}:
+            where += " AND ignored=0"
         if term:
             where += " AND instr(fold(title),?)>0"
             params.append(term.casefold())
@@ -2082,25 +2212,49 @@ def create_app(data=None, root=None, workers=True):
         for excluded_kind in sorted(excluded):
             where += " AND kind<>?"
             params.append(excluded_kind)
-        order = "created DESC,rowid DESC" if state == "jobs" else PUBLICATION_ORDER
+        order = publication_order(request.args.get("sort", "newest"))
+        if state == "jobs":
+            order = "created DESC,rowid DESC"
+        if "unwatched" in filters:
+            where += " AND watched=0"
+        if "progress" in filters:
+            where += " AND (state IN ('queued','running','cancelling') OR (state='ready' AND position>0 AND watched=0))"
+        if filters & {"today", "week"}:
+            try:
+                today = datetime.strptime(request.args.get("today", time.strftime("%Y%m%d")), "%Y%m%d").date()
+            except ValueError:
+                raise ValueError("invalid_filter") from None
+            start = today if "today" in filters else today - timedelta(days=today.weekday())
+            where += f" AND {PUBLICATION_DATE} BETWEEN ? AND ?"
+            params.extend((start.strftime("%Y%m%d"), today.strftime("%Y%m%d")))
         if scope == "inbox":
             where += " AND channel_id IS NULL"
         elif scope == "continue":
             where += " AND position>0"
+        elif scope == "watched":
+            where += " AND watched=1"
         elif scope.startswith("channel:"):
             where += " AND channel_id=?"
             params.append(scope.split(":", 1)[1])
         elif scope.startswith("playlist:"):
             where += " AND id IN (SELECT video_id FROM playlist_item WHERE playlist_id=?)"
             params.append(scope.split(":", 1)[1])
+        if request.args.get("hide_watched") == "1" and scope != "watched":
+            where += " AND watched=0"
         page = min(1000000, max(1, request.args.get("page", 1, type=int)))
         with archive.db() as db:
             db.execute("BEGIN")
+            badge_days = archive.defaults(db)["new_badge_days"]
+            if "new" in filters:
+                where += " AND state='ready' AND unopened_auto=1"
+                if badge_days:
+                    where += f" AND {DOWNLOAD_DATE}>?"
+                    params.append(timestamp() - badge_days * 86400)
             total = db.execute(f"SELECT count(*) FROM video WHERE {where}", params).fetchone()[0]
             rows = db.execute(f"SELECT * FROM video WHERE {where} ORDER BY {order} LIMIT 60 OFFSET ?",
                               (*params, 60 * (page - 1)))
             profiles = {}
-            return jsonify(total=total, videos=[library_video(row, db, profiles, summary) for row in rows])
+            return jsonify(total=total, videos=[library_video(row, db, profiles, summary, badge_days) for row in rows])
 
     @app.delete("/api/videos/<video_id>")
     def remove_video(video_id):
@@ -2226,6 +2380,8 @@ def create_app(data=None, root=None, workers=True):
             overrides = (capture_preferences(data["overrides"]) if "overrides" in data
                          else json.loads(row["capture_overrides"]))
             prefs = {**archive.effective(db, archive.channel(db, row["channel_id"])), **overrides}
+            if row["kind"] in {"shorts", "streams"}:
+                collector.require_content_allowed(row["kind"], prefs)
             db.execute("""UPDATE video SET state='queued',percent=0,error=NULL,
                 progress_phase=NULL,progress_estimated=0,prefs=?,
                 capture_overrides=? WHERE id=?""", (encode(prefs), encode(overrides), video_id))
@@ -2233,6 +2389,27 @@ def create_app(data=None, root=None, workers=True):
         if workers and row["title"] in {row["url"], row["id"]}:
             archive.titles.submit(archive.lookup_download_title, video_id)
         return jsonify(ok=True)
+
+    @app.post("/api/videos/<video_id>/ignored")
+    def set_ignored(video_id):
+        ignored = local_change().get("ignored")
+        if type(ignored) is not bool:
+            raise ValueError("invalid_ignored")
+        with archive.db() as db:
+            archive.ready_video(db, video_id)
+            db.execute("UPDATE video SET ignored=? WHERE id=?", (int(ignored), video_id))
+        return jsonify(ok=True, ignored=ignored)
+
+    @app.post("/api/videos/<video_id>/watched")
+    def set_watched(video_id):
+        watched = local_change().get("watched")
+        if type(watched) is not bool:
+            raise ValueError("invalid_watched")
+        with archive.db() as db:
+            archive.ready_video(db, video_id)
+            db.execute("UPDATE video SET watched=?,unopened_auto=CASE WHEN ? THEN 0 ELSE unopened_auto END WHERE id=?",
+                       (int(watched), int(watched), video_id))
+        return jsonify(ok=True, watched=watched)
 
     @app.post("/api/videos/<video_id>/opened")
     def opened(video_id):
@@ -2302,7 +2479,7 @@ def create_app(data=None, root=None, workers=True):
 
     @app.get("/api/playlists/<playlist_id>/export")
     def export_playlist(playlist_id):
-        return archive.export_playlist(playlist_id)
+        return archive.export_playlist(playlist_id, request.args.get("sort", "newest"))
 
     @app.get("/media/<video_id>/<asset>")
     def media(video_id, asset):

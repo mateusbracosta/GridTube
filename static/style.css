@@ -46,6 +46,14 @@ main{max-width:1610px;margin:auto;padding:30px clamp(18px,3.3vw,48px) 55px}
 .content-tabs{display:flex;gap:8px;margin:0 0 20px;border-bottom:1px solid var(--edge);padding-bottom:12px}
 .content-tabs button{border-radius:8px;padding:8px 18px}
 .content-tabs button[aria-pressed=true],.content-tabs button[aria-pressed=true]:hover{background:var(--text);color:var(--bg);border-color:var(--text)}
+.library-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.library-filters .content-tabs{flex:1;margin-bottom:0;min-width:0}
+.library-filters>.icon-only{margin-left:auto;flex:none}
+.feed-filters{display:flex;align-items:center;flex-wrap:wrap;gap:7px;width:100%}
+.feed-filters button{border-radius:20px;font-size:12px;padding:6px 12px}
+.feed-filters button[aria-pressed=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.feed-filters select{width:auto;max-width:100%;margin-left:auto;font-size:12px;padding:6px 9px}
+.watched-badge{display:inline-block;margin-top:5px;padding:2px 6px;font-size:11px;border:1px solid var(--edge);border-radius:4px;color:var(--muted)}
 .new-badge{display:inline-block;width:fit-content;margin-top:5px;padding:2px 6px;border-radius:4px;background:#343434;color:#f5f5f5;font-size:11px;font-weight:700;line-height:1.4}
 .muted,small{color:var(--muted)}
 .empty{padding:28px 21px;line-height:1.6;background:var(--panel);border:1px dashed #3a3a3a;border-radius:var(--radius);color:var(--muted)}
@@ -82,6 +90,19 @@ button.danger-solid:hover:not(:disabled){background:#861429;border-color:#ff8594
 .card h3{font-size:14px;line-height:1.38;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin:0 0 4px}
 .card small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-body button{padding:1px 5px}
+.pending-card{border:1px solid var(--edge);border-radius:13px;padding:7px;background:var(--panel)}
+.pending-visual img{opacity:.65}
+.pending-visual img[hidden]{display:none}
+.pending-visual .timed{top:8px;bottom:auto}
+.pending-overlay{position:absolute;inset:auto 0 0;padding:22px 10px 10px;background:linear-gradient(transparent,#050505ed);color:white;font-size:12px}
+.pending-overlay .job-progress small{white-space:normal}
+.pending-overlay progress{position:static;height:6px}
+.pending-state{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
+.pending-card.running .pending-state,.pending-card.failed .pending-state{color:#ff8b98}
+.pending-card.failed{border-color:#85404a}
+.pending-error{font-size:12px;color:#ff9aa5;overflow-wrap:anywhere;margin:9px 0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.pending-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:9px}
+.pending-actions button{font-size:12px;padding:6px 9px}
 .jobs{display:grid;gap:10px}
 .job{display:flex;align-items:center;gap:15px;background:var(--panel);padding:13px;border:1px solid var(--edge);border-radius:9px;overflow-wrap:anywhere}
 .job > div{flex:1;min-width:0;display:grid;gap:5px}

@@ -171,12 +171,12 @@ const translations = {
   autoSub: ["Legendas automáticas","Automatic subtitles"],
   yes: ["Permitir","Allow"],
   no: ["Desativar","Disable"],
-  include: ["Incluir Shorts","Include Shorts"],
-  exclude: ["Excluir Shorts","Exclude Shorts"],
+  include: ["Permitir Shorts","Allow Shorts"],
+  exclude: ["Não baixar Shorts","Do not download Shorts"],
   only: ["Somente Shorts","Shorts only"],
   auto: ["Baixar novos uploads automaticamente","Automatically download new uploads"],
   autoNote: ["A primeira consulta automática define o ponto de partida.","The first automatic check establishes a starting point."],
-  configNote: ["As preferências do canal substituem os padrões globais. A seleção manual inclui os vídeos marcados.","Channel preferences override global defaults. Manual selection includes all checked videos."],
+  configNote: ["As preferências do canal substituem os padrões globais. As regras de Shorts e Lives também valem para a seleção manual.","Channel preferences override global defaults. Shorts and Live stream rules also apply to manual selections."],
   channel: ["Canal","Channel"],
   playlist: ["Playlist","Playlist"],
   organize: ["Organizar vídeo","Organize video"],
@@ -269,8 +269,48 @@ const translations = {
   streams: ["Lives","Live streams"],
   contentTabs: ["Tipo de conteúdo","Content type"],
   newVideo: ["Novo","New"],
-  lives: ["Baixar lives automaticamente","Download live streams automatically"],
-  livesHelp: ["Controla o acompanhamento automático. Seleções manuais e links continuam disponíveis.","Controls channel monitoring. Manual selections and links remain available."],
+  lives: ["Lives","Live streams"],
+  allowCapture: ["Permitir","Allow"],
+  disableCapture: ["Não baixar","Do not download"],
+  livesHelp: ["Shorts e Lives controlam novos downloads por seleção, link e acompanhamento automático. Desativar não exclui arquivos já baixados.","Shorts and Live streams control new downloads from selections, links and channel monitoring. Disabling keeps existing files."],
+  shorts_disabled: ["O download de Shorts está desativado nas preferências globais ou deste canal.","Shorts downloads are disabled in global or channel preferences."],
+  lives_disabled: ["O download de lives está desativado nas preferências globais ou deste canal.","Live stream downloads are disabled in global or channel preferences."],
+  shorts_only: ["As preferências atuais permitem baixar somente Shorts.","Current preferences allow downloading Shorts only."],
+  blockedDownloads: ["Bloqueados pelas preferências de download","Blocked by download preferences"],
+  maxDuration: ["Duração máxima para download (minutos)","Maximum download duration (minutes)"],
+  autoDeleteDays: ["Excluir automaticamente do disco após (dias)","Automatically delete from disk after (days)"],
+  newBadgeDays: ["Duração do selo Novo (dias)","New badge duration (days)"],
+  noLimit: ["Sem limite","No limit"],
+  never: ["Nunca","Never"],
+  untilOpened: ["Até abrir o vídeo","Until the video is opened"],
+  durationHelp: ["Vazio ou 0: sem limite. Vale para seleção manual, links e acompanhamento automático.","Empty or 0: no limit. Applies to manual selections, links and channel monitoring."],
+  autoDeleteHelp: ["Vazio ou 0: nunca. Um valor em dias apaga os vídeos e arquivos auxiliares do disco após o download. O padrão preserva tudo.","Empty or 0: never. A number of days deletes videos and sidecars from disk after downloading. The default keeps everything."],
+  newBadgeHelp: ["Vazio ou 0: só desaparece ao abrir. Com um prazo, desaparece ao abrir ou ao completar os dias, o que vier primeiro.","Empty or 0: disappears only when opened. With a time limit, disappears when opened or when that many days pass, whichever comes first."],
+  duration_limit_exceeded: ["O vídeo ultrapassa a duração máxima permitida para download.","The video exceeds the maximum allowed download duration."],
+  duration_unavailable: ["Não foi possível confirmar a duração para aplicar o limite. Tente novamente.","The duration could not be confirmed to apply the limit. Try again."],
+  retention_deleted: ["Vídeos excluídos pelo prazo automático","Videos deleted by automatic retention"],
+  retention_failed: ["Não foi possível excluir um vídeo pelo prazo automático","Automatic deletion could not remove a video"],
+  watched: ["Assistidos","Watched"],
+  ignored: ["Ignorados","Ignored"],
+  ignoreVideo: ["Ignorar vídeo","Ignore video"],
+  unignoreVideo: ["Voltar à biblioteca","Return to library"],
+  invalid_ignored: ["Opção de ignorar inválida.","Invalid ignored option."],
+  markWatched: ["Marcar como assistido","Mark as watched"],
+  markUnwatched: ["Marcar como não assistido","Mark as unwatched"],
+  hideWatched: ["Ocultar assistidos","Hide watched videos"],
+  showWatched: ["Mostrar assistidos","Show watched videos"],
+  invalid_watched: ["Opção de assistido inválida.","Invalid watched option."],
+  filterNew: ["Novos","New"],
+  filterToday: ["Hoje","Today"],
+  filterWeek: ["Esta semana","This week"],
+  filterUnwatched: ["Não assistidos","Unwatched"],
+  filterProgress: ["Em andamento","In progress"],
+  combineFilters: ["Os filtros selecionados são combinados para refinar os resultados.","Selected filters are combined to narrow the results."],
+  sortOrder: ["Ordem dos vídeos","Video order"],
+  newest: ["Mais recentes primeiro","Newest first"],
+  oldest: ["Mais antigos primeiro","Oldest first"],
+  invalid_sort: ["Ordem inválida.","Invalid sort order."],
+  invalid_filter: ["Filtro inválido.","Invalid filter."],
   interface: ["Interface","Interface"],
   hideShorts: ["Nunca exibir Shorts","Never show Shorts"],
   hideLives: ["Nunca exibir lives","Never show live streams"],
@@ -292,6 +332,8 @@ const translations = {
 };
 
 const paths = {
+  eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff:'<path d="m3 3 18 18M10 5a12 12 0 0 1 12 7 17 17 0 0 1-3 4M6 6a17 17 0 0 0-4 6s4 7 10 7a14 14 0 0 0 5-1M10 10a3 3 0 0 0 4 4"/>',
   play:'<path d="m8 5 12 7-12 7z" fill="currentColor" stroke="none"/>',
   library:'<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
@@ -329,6 +371,8 @@ let scope = "", search = "", page = 1, lastRequest = 0, prior = "", displayed = 
 let contentKind = "videos";
 let hideShorts = localStorage.getItem("gridtube.hideShorts")==="true";
 let hideLives = localStorage.getItem("gridtube.hideLives")==="true";
+let libraryFilters = new Set();
+let sortOrder = localStorage.getItem("gridtube.sort")==="oldest"?"oldest":"newest";
 const selectedVideos = new Map();
 let selectionContext = "", lastSelectedVideo = null;
 let catalog = null, flashTimer;
@@ -405,7 +449,7 @@ function watchPath() {
   return /^\/watch\/([A-Za-z0-9_-]{11})\/?$/.exec(location.pathname)?.[1];
 }
 function libraryView() {
-  return {scope,search,page,contentKind,scroll:window.scrollY};
+  return {scope,search,page,contentKind,filters:[...libraryFilters],scroll:window.scrollY};
 }
 function rememberLibrary() {
   history.replaceState({library:libraryView()},"","/");
@@ -418,6 +462,7 @@ function disposeWatch() {
 }
 function showLibrary(target, query="") {
   scope=target; search=query; page=1; contentKind="videos";
+  libraryFilters.clear();
   get("search").value=search;
   app.querySelector(".shell").classList.remove("menu");
   if (watchPath()) history.pushState({library:libraryView()},"","/");
@@ -446,6 +491,7 @@ async function showLocation(autoplay=false, restore=false) {
     if (previous) {
       ({scope,search,page}=previous);
       contentKind=["videos","shorts","streams"].includes(previous.contentKind)?previous.contentKind:"videos";
+      libraryFilters=new Set((previous.filters||[]).filter(value=>["new","today","week","unwatched","progress"].includes(value)));
       get("search").value=search;
     }
     document.title=appName;
@@ -531,7 +577,7 @@ function published(raw) {
 function nav() {
   const item = (key,title,glyph) => btn("scope",title,glyph,!watchPath()&&scope===key?"active":"",key);
   const pending = (state.counts.queued||0)+(state.counts.running||0)+(state.counts.cancelling||0);
-  const html = `<div class="nav">${item("",t("library"),"library")}${item("continue",t("resume"),"clock")}${item("inbox",t("inbox"),"inbox")}
+  const html = `<div class="nav">${item("",t("library"),"library")}${item("ignored",t("ignored"),"eyeOff")}${item("watched",t("watched"),"eye")}${item("inbox",t("inbox"),"inbox")}
     ${item("downloads",t("downloads")+(pending?` · ${pending}`:""),"download")}${state.counts.removed||scope==="removed"?item("removed",t("removed"),"inbox"):""}</div>
     <div class="nav-head">${t("channels")}${btn("localChannel",t("localChannel"),"plus","flat icon-only")}</div>
     <div class="nav">${state.channels.map(c=>`<button type="button" class="${!watchPath()&&scope===`channel:${c.id}`?"active":""}" data-action="scope" data-value="channel:${c.id}" title="${esc(c.name)}" aria-label="${esc(c.name)}">${channelAvatar(c)}<span>${esc(c.name)}</span></button>`).join("")}</div>
@@ -579,25 +625,30 @@ function applyVisibility(query) {
 async function loadLibrary() {
   if (watchPath()) return;
   const id = ++lastRequest;
-  const query = new URLSearchParams({summary:"1",scope,q:search,page,state:({downloads:"jobs",removed:"removed"})[scope]||"ready"});
-  const hasTabs = !scope || scope.startsWith("channel:");
+  const query = new URLSearchParams({summary:"1",scope,q:search,page,state:({downloads:"jobs",removed:"removed",continue:"ready",watched:"ready",ignored:"ready"})[scope]||"library"});
+  const hasTabs = !scope || scope.startsWith("channel:") || ["ignored","watched"].includes(scope);
   if (!visibleKinds().includes(contentKind)) contentKind="videos";
   if (hasTabs) query.set("kind",contentKind);
   if (!["downloads","removed"].includes(scope)) applyVisibility(query);
+  query.set("sort",sortOrder);
+  if (!["downloads","removed"].includes(scope)) {
+    for (const filter of libraryFilters) query.append("filter",filter);
+    const now=new Date();query.set("today",`${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`);
+  }
   try {
     const {videos,total} = await api(`/videos?${query}`);
     if (id!==lastRequest) return;
     if (page>1 && !videos.length) { page=Math.max(1,Math.ceil(total/60)); return loadLibrary(); }
-    const signature = JSON.stringify([scope,search,page,contentKind,hideShorts,hideLives,videos,total,state.channels,state.playlists]);
+    const signature = JSON.stringify([scope,search,page,contentKind,hideShorts,hideLives,[...libraryFilters],sortOrder,videos,total,state.channels,state.playlists]);
     if (prior===signature) return;
     prior=signature; displayed=videos;
-    const context = `${scope}\n${search}\n${hasTabs?contentKind:"all"}\n${hideShorts}\n${hideLives}`;
+    const context = `${scope}\n${search}\n${hasTabs?contentKind:"all"}\n${hideShorts}\n${hideLives}\n${[...libraryFilters].sort()}\n${sortOrder}`;
     if (selectionContext!==context) { selectedVideos.clear(); lastSelectedVideo=null; selectionContext=context; }
     const channel = scope.startsWith("channel:") && channelOf(scope.slice(8));
     const playlist = scope.startsWith("playlist:") && state.playlists.find(p => p.id===scope.slice(9));
-    const title = channel?.name || playlist?.name || t(({continue:"resume",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
+    const title = channel?.name || playlist?.name || t(({continue:"resume",ignored:"ignored",watched:"watched",inbox:"inbox",downloads:"downloads",removed:"removed"})[scope] || "library");
     const actions = channel ? `${channel.source?btn("browse",t("browse"),"download","accent",channel.id):""}${btn("edit",t("edit"),"settings","",channel.id)}${channel.source?btn("profile",t("refreshProfile"),"","flat",channel.id):""}` : "";
-    const home = !scope && !search && page===1 && contentKind==="videos", hero = home && videos[0];
+    const home = !scope && !search && page===1 && contentKind==="videos", hero = home && videos.find(video=>video.state==="ready");
     const head = home ? `<section class="hero ${hero?.thumbnail?"":"empty-art"}">
       ${hero?.thumbnail?`<img src="${asset(hero.id,hero.thumbnail)}" alt="">`:'<div class="art" aria-hidden="true"></div>'}
       <div class="hero-content">${hero?newBadge(hero):""}<h1>${esc(hero?.title||t("title"))}</h1><p>${esc(hero?.source_channel||t(hero?"recent":"intro"))}</p>
@@ -606,7 +657,7 @@ async function loadLibrary() {
       channel ? channelPage(channel,actions) : `<div class="page-head"><h1 class="${playlist?"collection-title":""}">${playlist?collectionMark(playlist,"list","heading"):""}${esc(title)}</h1>${playlist?
         `${btn("editPlaylist",t("customizeCollection"),"settings","",playlist.id)}
         ${btn("deletePlaylist",t("deletePlaylist"),"trash","flat",playlist.id)}
-        <a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
+        <a class="accent" href="/api/playlists/${encodeURIComponent(playlist.id)}/export?sort=${sortOrder}" download>${icon("download")} ${t("exportPlaylist")}</a>`:""}</div>`;
     const isQueue = scope==="downloads", isRemoved = scope==="removed";
     const results = videos.length
       ? `<div class="${isQueue||isRemoved?"jobs":"grid"}">${videos.map(isQueue?job:isRemoved?removedRow:card).join("")}</div>`
@@ -614,7 +665,12 @@ async function loadLibrary() {
     closeSelectionMenu();
     const tabs = hasTabs ? `<nav class="content-tabs" aria-label="${t("contentTabs")}">${visibleKinds().map(kind=>
       `<button type="button" data-action="contentKind" data-value="${kind}" aria-pressed="${contentKind===kind}">${t(kind)}</button>`).join("")}</nav>` : "";
-    get("library").innerHTML = head + tabs + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
+    const filters=!["downloads","removed"].includes(scope)?`<div class="feed-filters" role="group" aria-label="${t("combineFilters")}" title="${t("combineFilters")}">
+      ${[["all","all"],["new","filterNew"],["today","filterToday"],["week","filterWeek"],["unwatched","filterUnwatched"],["progress","filterProgress"]].map(([value,label])=>
+        `<button type="button" data-action="libraryFilter" data-value="${value}" aria-pressed="${value==="all"?!libraryFilters.size:libraryFilters.has(value)}">${t(label)}</button>`).join("")}
+      <select id="library-order" aria-label="${t("sortOrder")}">${["newest","oldest"].map(order=>option(order,t(order),sortOrder)).join("")}</select></div>`:"";
+    get("library").innerHTML = head + `<div class="library-filters">${tabs}${filters}</div>` + (videos.length||selectedVideos.size?selectionToolbar():"") + results + pages(page,total,60,"page");
+    if (get("library-order")) get("library-order").onchange=async event=>{sortOrder=event.target.value;localStorage.setItem("gridtube.sort",sortOrder);page=1;rememberLibrary();await loadLibrary();};
     updateSelection();
     if (channel?.source&&!channel.profile?.locale_available) {
       const key=`${channel.id}:${locale}`;
@@ -672,7 +728,9 @@ function openSelectionMenu(item, anchor, point) {
   menu.setAttribute("role","menu");
   menu.setAttribute("aria-label",t("moreOptions"));
   menu.innerHTML=btn("selectVideo",t(selectedVideos.has(item.id)?"deselectVideo":"selectVideo"),"list","flat",item.id);
-  menu.querySelector("button").setAttribute("role","menuitem");
+  if (item.state==="ready") menu.innerHTML+=btn("markWatched",t(item.watched?"markUnwatched":"markWatched"),"eye","flat",item.id)+
+    btn("ignoreVideo",t(item.ignored?"unignoreVideo":"ignoreVideo"),"eyeOff","flat",item.id);
+  menu.querySelectorAll("button").forEach(button=>button.setAttribute("role","menuitem"));
   menu.returnFocus=anchor;
   document.body.append(menu);
   const bounds=anchor.getBoundingClientRect(), box=menu.getBoundingClientRect();
@@ -684,12 +742,29 @@ function openSelectionMenu(item, anchor, point) {
 }
 function newBadge(v) { return v.is_new?`<span class="new-badge">${t("newVideo")}</span>`:""; }
 function card(v) {
+  if (v.state!=="ready") return pendingCard(v);
   const length = duration(v.duration);
   return `<article class="card" data-video-id="${v.id}">${selectionCheckbox(v)}<a href="/watch/${v.id}" class="visual ${v.thumbnail?"":"no-thumb"}" data-action="watch" data-value="${v.id}" aria-label="${esc(`${t("play")} ${v.title}`)}">
     ${v.thumbnail?`<img src="${asset(v.id,v.thumbnail)}" alt="" loading="lazy">`:""}<span class="play">${icon("play")}</span>
     ${length?`<span class="timed">${length}</span>`:""}${v.position&&v.duration?`<progress max="${Number(v.duration)}" value="${Number(v.position)}"></progress>`:""}</a>
-    <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small>${newBadge(v)}</div>
+    <div class="card-body"><div class="card-text"><h3>${esc(v.title)}</h3><small>${esc(originName(v))}${v.upload_date&&published(v.upload_date)?` · ${published(v.upload_date)}`:""}</small>${newBadge(v)}${v.watched?`<span class="watched-badge">${t("watched")}</span>`:""}</div>
     ${btn("organize",t("organize"),"more","flat icon-only",v.id)}</div></article>`;
+}
+function pendingCard(v) {
+  const label=t(v.state==="queued"?"queuedState":v.state);
+  const picture=v.preview_thumbnail;
+  return `<article class="card pending-card ${v.state}" data-video-id="${v.id}">${selectionCheckbox(v)}
+    <div class="visual pending-visual" aria-label="${esc(`${jobTitle(v)} · ${label}`)}">
+      ${picture?`<img src="${esc(picture)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">`:""}
+      ${v.duration?`<span class="timed">${duration(v.duration)}</span>`:""}
+      <div class="pending-overlay">${v.state==="running"?jobProgress(v):`<span>${esc(label)}</span>`}</div>
+    </div><div class="card-body"><div class="card-text"><h3>${esc(jobTitle(v))}</h3>
+      <small>${esc(originName(v))}</small><span class="pending-state">${esc(label)}</span></div>
+      ${btn("selectionMenu",t("moreOptions"),"more","flat icon-only",v.id)}</div>
+    ${v.error?`<p class="pending-error" title="${esc(t(v.error))}">${esc(t(v.error))}</p>`:""}
+    <div class="pending-actions">${v.state==="failed"?btn("retry",t("retry"),"download","",v.id):""}
+      ${v.state!=="cancelling"?btn("cancelDownload",t(v.state==="failed"?"removeDownload":"cancelDownload"),"trash","danger icon-only",v.id):""}</div>
+  </article>`;
 }
 function jobTitle(v) {
   return v.title && v.title !== v.url && v.title !== v.id ? v.title : `${t("youtubeVideo")} · ${v.id}`;
@@ -700,7 +775,7 @@ function job(v) {
     ${v.error?`<small>${esc(t(v.error))}</small>`:""}</div><aside class="job-actions">
       ${btn("selectionMenu",t("moreOptions"),"more","flat icon-only",v.id)}
       ${v.state==="failed"?`${btn("editRetry",t("editRetry"),"settings","",v.id)}${btn("retry",t("retry"),"","flat",v.id)}`:""}
-      ${v.state!=="cancelling"?btn("cancelDownload",t(v.state==="failed"?"removeDownload":"cancelDownload"),"close","flat",v.id):""}
+      ${v.state!=="cancelling"?btn("cancelDownload",t(v.state==="failed"?"removeDownload":"cancelDownload"),"trash","danger",v.id):""}
     </aside></article>`;
 }
 function jobProgress(v) {
@@ -959,22 +1034,29 @@ function prefs(values,local,{single=false,inherited={},inheritLabel=t("inherit")
     download_mode:[["compact",t("compact")],["original",t("originalQuality")]],
     quality:["360","480","720","1080","1440","2160","best"].map(q=>[q,q==="best"?t(q):`${q}p`]),
     shorts:["include","exclude","only"].map(k=>[k,t(k)]),
-    lives:[["include",t("yes")],["exclude",t("no")]],
+    lives:[["include",t("allowCapture")],["exclude",t("disableCapture")]],
     audio:[["original",t("original")],["pt-BR","Português (Brasil)"],["en","English"]],
     subtitles:[["none",t("none")],["pt-BR","Português (Brasil)"],["en","English"],["both",t("both")]],
     auto_subtitles:[["true",t("yes")],["false",t("no")]]
   };
   if (single) { delete choices.shorts;delete choices.lives; }
+  const numericField=(key,label,placeholder,help)=>`<label>${t(label)}<input type="number" min="0" max="1000000" step="1"
+    name="pref_${key}" value="${esc(local?(values[key]??""):(values[key]||""))}" placeholder="${esc(placeholder)}"><small class="note">${help}</small></label>`;
+  const durationDefault=local?`${inheritLabel} · ${inherited.max_duration?`${inherited.max_duration} min`:t("noLimit")}`:t("noLimit");
+  const numericFields=single?"":numericField("max_duration","maxDuration",durationDefault,t("durationHelp"))+
+    (local?"":numericField("auto_delete_days","autoDeleteDays",t("never"),t("autoDeleteHelp"))+
+      numericField("new_badge_days","newBadgeDays",t("untilOpened"),t("newBadgeHelp")));
   return `<div class="cols">${Object.entries(choices).map(([key,items])=>{
     const inheritedChoice = items.find(([value])=>value===String(inherited[key]))?.[1];
     const inheritedOption = inheritedChoice ? `${inheritLabel} · ${inheritedChoice}` : inheritLabel;
     return select(`pref_${key}`,t(key==="auto_subtitles"?"autoSub":key),
       local?[["",inheritedOption],...items]:items,String(values[key]??""));
-  }).join("")}</div><small class="note">${t("resolutionHelp")}${single?"":` ${t("livesHelp")}`}</small>`;
+  }).join("")}${numericFields}</div><small class="note">${t("resolutionHelp")}${single?"":` ${t("livesHelp")}`}</small>`;
 }
 function readPrefs(data) {
   return Object.fromEntries([...data].filter(([k,v])=>k.startsWith("pref_")&&v!=="")
-    .map(([k,v])=>[k.slice(5),k==="pref_auto_subtitles"?v==="true":v]));
+    .map(([k,v])=>[k.slice(5),k==="pref_auto_subtitles"?v==="true":
+      ["pref_max_duration","pref_auto_delete_days","pref_new_badge_days"].includes(k)?Number(v):v]));
 }
 function channels(inbox=t("inbox")) { return [["",inbox],...state.channels.map(c=>[c.id,c.name])]; }
 
@@ -1149,7 +1231,8 @@ function openCatalog(source,channel) {
       const result = channel ? await api(`/channels/${channel.id}/queue`,"POST",{selected}) :
         await api("/channels","POST",{source,selected,name:data.get("name"),overrides:readPrefs(data),
           auto:data.has("auto"),title_filter:data.get("title_filter")});
-      await finish(result.queued?`${t("queued")} · ${result.queued}`:t("done"));
+      await finish([result.queued?`${t("queued")} · ${result.queued}`:t("done"),
+        result.blocked?`${t("blockedDownloads")} · ${result.blocked}`:""].filter(Boolean).join(" · "));
     } finally { session.busy = false; }
   });
   api("/scans/playlists","POST",{source}).catch(()=>{});
@@ -1347,7 +1430,7 @@ function watch(item, initialJobs=[], autoplay=false) {
   player.ontimeupdate = ()=>{if(Math.abs(player.currentTime-last)>=10) update(player.currentTime);};
   player.onseeked = ()=>update(player.currentTime);
   player.onpause = ()=>update(player.ended?0:player.currentTime);
-  player.onended = ()=>update(0);
+  player.onended = ()=>{update(0);api(`/videos/${item.id}/watched`,"POST",{watched:true}).then(()=>{item.watched=true;}).catch(error=>flash(t(error.message)));};
 
   async function queue(kind,code,retry=false) {
     const result = await api(endpoint,"POST",{kind,code,retry});
@@ -1603,6 +1686,8 @@ function organize(item) {
   dialog(t("organize"),`<div class="dialog-body"><strong>${esc(item.title)}</strong>
     ${youtubeLink(item)}
     ${!watchPath()?btn("selectVideo",t(selectedVideos.has(item.id)?"deselectVideo":"selectVideo"),"list","",item.id):""}
+    ${btn("markWatched",t(item.watched?"markUnwatched":"markWatched"),"eye","",item.id)}
+    ${btn("ignoreVideo",t(item.ignored?"unignoreVideo":"ignoreVideo"),"eyeOff","",item.id)}
     <form id="move">${select("channel",t("move"),[...channels(t("unfiled")),["__new__",t("createChannelOption")]],item.channel_id||"")}
     <button>${t("move")}</button></form>
     <form id="add-to">${select("playlist",t("addTo"),[["",t("choosePlaylist")],...state.playlists.map(p=>[p.id,p.name]),["__new__",t("createPlaylistOption")]],"")}<button>${t("addTo")}</button></form>
@@ -1708,6 +1793,18 @@ async function act(action,value) {
       if (history.state?.watchFromApp) history.back(); else showLibrary("");
       break;
     case "page": page=Number(value);rememberLibrary();await loadLibrary();break;
+    case "libraryFilter":
+      if (value==="all") libraryFilters.clear();
+      else if (["new","today","week","unwatched","progress"].includes(value)) {
+        if (libraryFilters.has(value)) libraryFilters.delete(value);else libraryFilters.add(value);
+      }
+      page=1;rememberLibrary();await loadLibrary();break;
+    case "markWatched":
+      await api(`/videos/${value}/watched`,"POST",{watched:!item.watched});
+      item.watched=!item.watched;selectedVideos.delete(value);closeSelectionMenu();if(modal.open)modal.close();await refresh();break;
+    case "ignoreVideo":
+      await api(`/videos/${value}/ignored`,"POST",{ignored:!item.ignored});
+      item.ignored=!item.ignored;selectedVideos.delete(value);closeSelectionMenu();if(modal.open)modal.close();await refresh();break;
     case "contentKind":
       if (!["videos","shorts","streams"].includes(value)) break;
       contentKind=value;page=1;rememberLibrary();await loadLibrary();break;

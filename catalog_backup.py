@@ -45,6 +45,8 @@ def load_backup(upload, target, schema, validate):
             # Backups from before the automatic-download badge remain restorable.
             if table == "video" and isinstance(row, dict):
                 row.setdefault("unopened_auto", 0)
+                row.setdefault("watched", 0)
+                row.setdefault("ignored", 0)
             if table not in columns or not isinstance(row, dict) or set(row) != set(columns[table]):
                 raise ValueError("backup_invalid")
             if validate(table, row):

@@ -185,7 +185,8 @@ class ContentLibraryTests(unittest.TestCase):
         with patch("collector.channel_entries", return_value=iter([(None, entry(3, "streams"))])):
             self.archive.sync_channels()
         self.assertEqual(self.rows(state="jobs", kind="streams")["total"], 1)
-        # An explicitly selected live is still allowed when monitoring excludes lives.
+        # Explicit selections follow the same policy as monitoring.
         with self.archive.db() as db:
             channel = self.archive.channel(db, self.channel)
-            self.assertEqual(self.archive.enqueue(db, entry(4, "streams"), channel, {"lives": "exclude"}), 1)
+            with self.assertRaisesRegex(ValueError, "lives_disabled"):
+                self.archive.enqueue(db, entry(4, "streams"), channel, {"lives": "exclude"})

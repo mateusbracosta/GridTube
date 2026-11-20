@@ -376,15 +376,47 @@ def audio_label(path, reported, prefer_reported=False):
         source = "youtube" if reported else "unknown"
     return {"audio": display, "audio_reported": reported, "audio_file_language": tag, "audio_label_source": source}
 
+def content_kind(info, fallback=None):
+    sources = (info.get("original_url") or "", info.get("webpage_url") or "")
+    if (info.get("media_type") == "livestream" or info.get("live_status") in {"was_live", "post_live"}
+            or info.get("was_live") or any("/live/" in source for source in sources)):
+        return "streams"
+    if info.get("media_type") == "short" or any("/shorts/" in source for source in sources):
+        return "shorts"
+    return fallback
+
+
+def content_allowed(kind, prefs):
+    return ((kind != "streams" or prefs.get("lives", "include") == "include")
+            and (prefs.get("shorts", "include") == "include"
+                 or (kind == "shorts") == (prefs["shorts"] == "only")))
+
+
+def require_content_allowed(kind, prefs):
+    if not content_allowed(kind, prefs):
+        raise ValueError({"shorts": "shorts_disabled", "streams": "lives_disabled"}.get(kind, "shorts_only"))
+
+
+def capture_allowed(kind, prefs, duration=None):
+    limit = prefs.get("max_duration", 0)
+    return content_allowed(kind, prefs) and (not limit or duration is None or duration <= limit * 60)
+
+
+def require_capture_allowed(kind, prefs, duration=None, require_duration=False):
+    require_content_allowed(kind, prefs)
+    if prefs.get("max_duration", 0):
+        if duration is None and require_duration:
+            raise ValueError("duration_unavailable")
+        if duration is not None and duration > prefs["max_duration"] * 60:
+            raise ValueError("duration_limit_exceeded")
+
+
 def video_metadata(info):
-    source = info.get("original_url") or info.get("webpage_url") or ""
-    kind = ("streams" if info.get("live_status") in {"was_live", "post_live"} or info.get("was_live")
-            else "shorts" if "/shorts/" in source else None)
     return {
         "title": info.get("title") or info["id"],
         "description": info.get("description") or "",
         "upload_date": info.get("upload_date") or info.get("release_date"),
-        "kind": kind,
+        "kind": content_kind(info),
         "source_channel": info.get("channel") or info.get("uploader"),
         "source_channel_id": info.get("channel_id") if source_channel_url(info.get("channel_id")) else None,
         "source_channel_url": source_channel_url(info.get("channel_id")),
@@ -617,7 +649,7 @@ def transfer_progress(event):
     return None
 
 
-def download(url, prefs, work, bundle, progress, *, on_title, cancel=None):
+def download(url, prefs, work, bundle, progress, *, on_title, cancel=None, kind="videos", check_policy=None):
     def check_cancelled():
         if cancel:
             cancel()
@@ -629,6 +661,11 @@ def download(url, prefs, work, bundle, progress, *, on_title, cancel=None):
     title = info.get("title") or info["id"]
     if title != info["id"]:
         on_title(title)
+    kind = content_kind(info, kind)
+    if check_policy:
+        check_policy(kind, info)
+    else:
+        require_capture_allowed(kind, prefs, info.get("duration"), require_duration=True)
     if title_filter and title_key(title_filter) not in title_key(info.get("title")):
         raise ValueError("title_filter_mismatch")
     formats = info.get("formats") or []
@@ -682,7 +719,7 @@ def download(url, prefs, work, bundle, progress, *, on_title, cancel=None):
             pass
         thumbnail = fallback.name if fallback.is_file() else None
     return {
-        **video_metadata(info), "id": info["id"], "filename": target.name,
+        **video_metadata(info), "kind": kind, "downloaded_at": int(time.time()), "id": info["id"], "filename": target.name,
         "thumbnail": thumbnail, "thumbnail_source": thumbnail_source,
         "duration": info.get("duration"), "source": url, "chapters": info.get("chapters") or [],
         "download_mode": mode, "video_codec": video_codec, "audio_codec": audio_codec,

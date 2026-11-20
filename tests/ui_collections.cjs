@@ -14,6 +14,7 @@ let videos = Array.from({length:65}, (_,i)=>({id:`item${String(i).padStart(7,'0'
 videos.push({id:'short000001',title:'Short fixture',kind:'shorts',channel_id:channel.id,state:'ready'},
   {id:'live0000001',title:'Live fixture',kind:'streams',channel_id:channel.id,state:'ready'});
 const requests = [];
+let previewPhase=false;
 let pending = true;
 const server = require('node:http').createServer((req,res)=>{
   (async()=>{
@@ -21,7 +22,7 @@ const server = require('node:http').createServer((req,res)=>{
     const chunks=[];
     for await (const chunk of req) chunks.push(chunk);
     const data=chunks.length?JSON.parse(Buffer.concat(chunks)):null;
-    requests.push({method:req.method,path:url.pathname,data,locale:req.headers['x-gridtube-locale']});
+    requests.push({method:req.method,path:url.pathname,query:url.search,data,locale:req.headers['x-gridtube-locale']});
     const send=(type,body)=>res.writeHead(200,{'Content-Type':type,'Content-Length':Buffer.byteLength(body)}).end(body);
     const json=value=>send('application/json',JSON.stringify(value));
     if (url.pathname==='/') return send('text/html; charset=utf-8',fs.readFileSync('static/index.html','utf8').replace('</head>',"<script>if(localStorage.getItem('gridtube.ui-test.detect')!=='1')localStorage.setItem('gridtube.locale','pt-BR')</script></head>"));
@@ -29,6 +30,20 @@ const server = require('node:http').createServer((req,res)=>{
     if (url.pathname==='/static/style.css') return send('text/css',fs.readFileSync('static/style.css'));
     if (url.pathname==='/static/icon.svg') return send('image/svg+xml',fs.readFileSync('static/icon.svg'));
     if (url.pathname==='/favicon.ico') return send('image/x-icon',fs.readFileSync('static/favicon.ico'));
+    if (url.pathname==='/fixtures/poster.svg') return send('image/svg+xml','<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><defs><linearGradient id="a"><stop stop-color="#163c51"/><stop offset="1" stop-color="#651f32"/></linearGradient></defs><path fill="url(#a)" d="M0 0h640v360H0z"/><text x="50" y="170" fill="white" font-family="sans-serif" font-size="44">Offline archive</text></svg>');
+    if (url.pathname==='/api/settings'&&req.method==='PUT') {state.settings={...state.settings,...data};return json(state.settings);}
+    if (url.pathname.endsWith('/watched')&&req.method==='POST') {
+      const row=videos.find(v=>v.id===url.pathname.split('/')[3]);row.watched=data.watched;if(data.watched)row.is_new=false;return json({ok:true});
+    }
+    if (url.pathname.endsWith('/ignored')&&req.method==='POST') {
+      videos.find(v=>v.id===url.pathname.split('/')[3]).ignored=data.ignored;return json({ok:true});
+    }
+    if (url.pathname.endsWith('/retry')&&req.method==='POST') {
+      const row=videos.find(v=>v.id===url.pathname.split('/')[3]);row.state='queued';row.error=null;return json({ok:true});
+    }
+    if (url.pathname.startsWith('/api/downloads/')&&req.method==='DELETE') {
+      videos=videos.filter(v=>v.id!==url.pathname.split('/')[3]);return json({cancelling:false});
+    }
     if (url.pathname==='/api/videos/item0000099/tracks') return json({video:{id:'item0000099',title:'Test video',filename:'main.mp4',state:'ready',duration:60},jobs:[]});
     if (/^\/api\/videos\/[^/]+\/tracks$/.test(url.pathname)) {
       const row=videos.find(v=>v.id===url.pathname.split('/')[3]);
@@ -43,9 +58,19 @@ const server = require('node:http').createServer((req,res)=>{
     if (url.pathname==='/api/videos') {
       const scope=url.searchParams.get('scope')||'';
       let rows=scope.startsWith('channel:')?videos.filter(v=>v.channel_id===scope.slice(8)):videos;
+      rows=rows.filter(v=>Boolean(v.ignored)===(scope==='ignored'));
+      if(scope==='watched')rows=rows.filter(v=>v.watched);
+      if(previewPhase){
+        const mode=url.searchParams.get('state');
+        rows=rows.filter(v=>mode==='jobs'?v.state!=='ready':mode==='library'?true:v.state==='ready');
+      }
       if(url.searchParams.has('kind')) rows=rows.filter(v=>v.kind===url.searchParams.get('kind'));
       const excluded=url.searchParams.getAll('exclude_kind');
       rows=rows.filter(v=>!excluded.includes(v.kind));
+      for(const filter of url.searchParams.getAll('filter')) {
+        rows=rows.filter(v=>filter==='unwatched'?!v.watched:filter==='new'?v.is_new:filter==='progress'?['queued','running','cancelling'].includes(v.state)||v.state==='ready'&&v.position>0&&!v.watched:filter==='today'?v.upload_date===url.searchParams.get('today'):true);
+      }
+      if(url.searchParams.get('sort')==='oldest')rows=[...rows].reverse();
       const start=(Number(url.searchParams.get('page')||1)-1)*60;
       return json({videos:rows.slice(start,start+60),total:rows.length});
     }
@@ -122,7 +147,10 @@ async function run() {
     await click('[data-action=back]');
     await until(()=>evaluate('document.querySelectorAll(".card").length===60&&!document.querySelector(".new-badge")'),'New badge did not disappear after opening');
     await click('[data-action=settings]');
-    assert.equal(await evaluate('document.querySelector("[name=pref_lives]").closest("label").firstChild.textContent.trim()'),'Baixar lives automaticamente');
+    assert.equal(await evaluate('document.querySelector("[name=pref_lives]").closest("label").firstChild.textContent.trim()'),'Lives');
+    assert.equal(await evaluate('document.querySelector("[name=pref_lives] option[value=exclude]").textContent'),'Não baixar');
+    assert.equal(await evaluate('document.querySelector("[name=pref_shorts] option[value=exclude]").textContent'),'Não baixar Shorts');
+    assert.equal(await evaluate('document.querySelector("#settings-downloads").textContent.includes("Desativar não exclui arquivos já baixados")'),true);
     await click('[data-action=settingsTab][data-value=interface]');
     await evaluate('document.querySelector("[name=hideShorts]").checked=true;document.querySelector("[name=hideLives]").checked=true;document.querySelector("#settings-interface button[type=submit]").click()');
     await until(()=>evaluate('!document.querySelector("dialog").open&&document.querySelectorAll(".content-tabs button").length===1'),'Hide controls did not remove tabs');
@@ -276,7 +304,68 @@ async function run() {
       const entry=6+index*16,size=ico[entry]||256,length=ico.readUInt32LE(entry+8),offset=ico.readUInt32LE(entry+12);
       assert.ok(offset+length<=ico.length);assert.equal(ico.readUInt32BE(offset+16),size);assert.equal(ico.readUInt32BE(offset+20),size);
     }
-    console.log('Chromium verified: content tabs and watch history, persistent independent visibility controls, live-download setting, New badge, brand navigation, localized profiles, selection, bulk deletion and mobile layout.');
+    previewPhase=true;
+    const today=new Date(),day=`${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+    const base={kind:'videos',channel_id:channel.id,upload_date:day,duration:120,preview_thumbnail:'/fixtures/poster.svg'};
+    videos=[{...base,id:'ready000001',title:'Saved video',state:'ready'},
+      {...base,id:'queue000001',title:'Waiting video',state:'queued'},
+      {...base,id:'run00000001',title:'Downloading video',state:'running',progress_phase:'video',percent:16},
+      {...base,id:'fail0000001',title:'Failed video',state:'failed',error:'lives_disabled'}];
+    await click('[data-action=scope][data-value="channel:abc1230001"]');
+    await until(()=>evaluate('document.querySelectorAll(".pending-card").length===3'),'Channel did not index pending cards');
+    assert.equal(await evaluate('document.querySelector(".pending-card.running").textContent.includes("16%")'),true);
+    assert.equal(await evaluate('Boolean(document.querySelector(".pending-card.failed [data-action=retry]"))'),true);
+    assert.equal(await evaluate('document.querySelector(".pending-card [data-action=cancelDownload]").classList.contains("danger")'),true);
+    assert.equal(await evaluate('document.querySelector(".feed-filters [data-value=all]").getAttribute("aria-pressed")'),'true');
+    assert.equal(await evaluate('document.querySelectorAll(".pending-card [data-action=watch]").length'),0);
+    await until(()=>evaluate('[...document.querySelectorAll(".pending-card img")].every(img=>img.complete&&img.naturalWidth>0)'),'Pending thumbnails unavailable');
+    const cardScreenshot=await cdp('Page.captureScreenshot',{format:'png'});
+    fs.writeFileSync(path.join(os.tmpdir(),'gridtube-download-cards.png'),Buffer.from(cardScreenshot.data,'base64'));
+    await click('[data-video-id=ready000001] [data-action=organize]');
+    await click('dialog [data-action=markWatched]');
+    await until(()=>evaluate('Boolean(document.querySelector(".watched-badge"))'),'Manual watched marking unavailable');
+    await click('[data-action=libraryFilter][data-value=unwatched]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===3'),'Unwatched filter did not hide watched');
+    await click('[data-action=libraryFilter][data-value=progress]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===2'),'Combined filters did not narrow results');
+    assert.equal(await evaluate('document.querySelectorAll(".feed-filters button[aria-pressed=true]").length'),2);
+    await click('[data-action=libraryFilter][data-value=all]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===4'),'All filter did not restore videos');
+    await evaluate('document.querySelector("#library-order").value="oldest";document.querySelector("#library-order").dispatchEvent(new Event("change"))');
+    await until(()=>evaluate('document.querySelector(".card")?.dataset.videoId==="fail0000001"'),'Oldest order unavailable');
+    await cdp('Page.reload',{ignoreCache:true});
+    await until(()=>evaluate('document.querySelector("#library-order")?.value==="oldest"&&document.querySelectorAll(".pending-card").length===3'),'Order preference did not persist');
+    await click('[data-action=scope][data-value=watched]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===1&&document.querySelector(".card").dataset.videoId==="ready000001"'),'Watched sidebar unavailable');
+    await click('[data-action=organize]');await click('dialog [data-action=ignoreVideo]');
+    await until(()=>evaluate('!document.querySelector(".card")'),'Ignored video remained in watched');
+    await click('[data-action=scope][data-value=ignored]');
+    await until(()=>evaluate('document.querySelector(".card")?.dataset.videoId==="ready000001"'),'Ignored sidebar unavailable');
+    assert.equal(await evaluate('Boolean(document.querySelector("#navigation [data-value=continue]"))'),false);
+    await click('[data-action=organize]');await click('dialog [data-action=ignoreVideo]');
+    await until(()=>evaluate('!document.querySelector(".card")'),'Return to library did not clear ignored');
+    await click('[data-action=scope][data-value="channel:abc1230001"]');
+    await until(()=>evaluate('document.querySelectorAll(".card").length===4'),'Unignored video did not return');
+    await click('[data-action=cancelDownload][data-value=queue000001]');
+    await until(()=>evaluate('!document.querySelector("[data-video-id=queue000001]")'),'Queue cancel did not update channel');
+    await click('[data-action=retry][data-value=fail0000001]');
+    await until(()=>evaluate('document.querySelector("[data-video-id=fail0000001]").classList.contains("queued")'),'Retry did not update channel');
+    await click('[data-action=scope][data-value=downloads]');
+    await until(()=>evaluate('document.querySelectorAll(".job").length===2'),'Downloads did not mirror channel jobs');
+    assert.equal(await evaluate('document.querySelector("#library").textContent.includes("16%")'),true);
+    await click('[data-action=settings]');
+    assert.equal(await evaluate('document.querySelector("[name=pref_max_duration]").placeholder'),'No limit');
+    assert.equal(await evaluate('document.querySelector("[name=pref_auto_delete_days]").placeholder'),'Never');
+    assert.equal(await evaluate('document.querySelector("[name=pref_new_badge_days]").placeholder'),'Until the video is opened');
+    await evaluate('document.querySelector("[name=pref_max_duration]").value=12;document.querySelector("[name=pref_auto_delete_days]").value=7;document.querySelector("[name=pref_new_badge_days]").value=3;document.querySelector("#settings-downloads button[type=submit]").click()');
+    await until(()=>evaluate('!document.querySelector("dialog").open'),'Numeric preferences did not save');
+    const preferences=requests.filter(r=>r.path==='/api/settings').at(-1).data;
+    assert.deepEqual([preferences.max_duration,preferences.auto_delete_days,preferences.new_badge_days],[12,7,3]);
+    await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+    await click('[data-action=scope][data-value="channel:abc1230001"]');
+    await until(()=>evaluate('Boolean(document.querySelector(".feed-filters"))'),'Mobile filters unavailable');
+    assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+    console.log('Chromium verified: pending channel cards/progress/retry/cancel, combined filters, saved sorting, numeric settings, watched/ignored workflows, tabs, visibility, localization, collections and mobile layout.');
     console.log('Screenshot:',screenshotPath);
   } finally {
     socket?.close();

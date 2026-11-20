@@ -8,6 +8,7 @@ async function run(){
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'gridtube-playback-'));
   const image=process.env.GRIDTUBE_TEST_IMAGE||/image:\s*(\S+)/.exec(fs.readFileSync('compose.yaml','utf8'))[1];
   let browser,socket,server;
+  let watchedRequests=0;
   try{
     const encoded=spawnSync('docker',['run','--rm','--network','none','-v',`${temp}:/fixture`,image,
       'ffmpeg','-loglevel','error','-f','lavfi','-i','color=c=black:s=160x90:r=5:d=8','-an',
@@ -30,6 +31,7 @@ async function run(){
         if(url==='/api/videos')return json({videos:[video],total:1});
         if(url==='/api/videos/fixture0001/tracks')return json({video,jobs:[]});
         if(url==='/api/videos/fixture0001/progress'){for await(const chunk of req){}return json({ok:true});}
+        if(url==='/api/videos/fixture0001/watched'){let body='';for await(const chunk of req)body+=chunk;assert.equal(JSON.parse(body).watched,true);watchedRequests++;return json({ok:true});}
         if(url==='/media/fixture0001/main.webm'||url==='/playback/fixture0001/en'){
           const range=/bytes=(\d+)-(\d*)/.exec(req.headers.range||'');
           const start=range?Number(range[1]):0,end=range&&range[2]?Math.min(Number(range[2]),media.length-1):media.length-1;
@@ -76,7 +78,9 @@ async function run(){
     await until(()=>evaluate('document.querySelector("#player").currentSrc.includes("/media/")&&document.querySelector("#player").readyState>=2&&!document.querySelector("#player").paused'),'Playing fallback did not resume');
     const playing=await evaluate('document.querySelector("#player").currentTime');
     assert.ok(playing>=2.9&&playing<4,`Playing fallback lost position: ${playing}`);
-    console.log('Chromium verified real WebM playback and alternate-audio fallback preserving current position and paused/playing state.');
+    await evaluate('document.querySelector("#player").currentTime=7.5;document.querySelector("#player").play()');
+    await until(()=>watchedRequests===1,'Finishing playback did not mark the video watched');
+    console.log('Chromium verified real WebM playback, completion marking as watched and alternate-audio fallback preserving current position and paused/playing state.');
   }finally{
     socket?.close();if(browser&&browser.exitCode===null){const done=new Promise(resolve=>browser.once('exit',resolve));browser.kill();await Promise.race([done,delay(2000)]);}
     if(server){server.closeAllConnections();server.close();}
