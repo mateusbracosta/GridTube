@@ -159,9 +159,10 @@ const translations = {
   inherit: ["Usar padrão global","Use global default"],
   download_mode: ["Modo de download","Download mode"],
   compact: ["Compacto","Compact"],
-  originalQuality: ["Qualidade original (máxima disponível)","Original quality (best available)"],
-  quality: ["Resolução máxima no modo compacto","Maximum resolution in compact mode"],
-  best: ["Melhor disponível","Best available"],
+  originalQuality: ["Qualidade original","Original quality"],
+  quality: ["Resolução máxima","Maximum resolution"],
+  resolutionHelp: ["O limite de resolução vale para os dois modos. Melhor disponível remove esse limite.","The resolution limit applies to both modes. Best available removes this limit."],
+  best: ["Melhor disponível (sem limite)","Best available (no limit)"],
   audio: ["Áudio preferido","Preferred audio"],
   original: ["Original","Original"],
   subtitles: ["Legendas","Subtitles"],
@@ -926,7 +927,7 @@ function prefs(values,local,{single=false,inherited={},inheritLabel=t("inherit")
     const inheritedOption = inheritedChoice ? `${inheritLabel} · ${inheritedChoice}` : inheritLabel;
     return select(`pref_${key}`,t(key==="auto_subtitles"?"autoSub":key),
       local?[["",inheritedOption],...items]:items,String(values[key]??""));
-  }).join("")}</div>`;
+  }).join("")}</div><small class="note">${t("resolutionHelp")}</small>`;
 }
 function readPrefs(data) {
   return Object.fromEntries([...data].filter(([k,v])=>k.startsWith("pref_")&&v!=="")
@@ -980,7 +981,7 @@ function editChannel(channel, videoId) {
     ${channel?.source?field("titleFilter",channel.title_filter,`maxlength="120" placeholder="${t("titleExample")}"`):""}
     ${!channel?.source?collectionFields(channel,"folder"):""}
     <label>${t("channelDescription")}<textarea name="description" maxlength="5000" rows="3">${esc(channel?.custom_description||"")}</textarea></label>
-    <p class="note">${t("configNote")}</p>${prefs(channel?.overrides||{},true)}${auto}`,"save",async data=>{
+    <p class="note">${t("configNote")}</p>${prefs(channel?.overrides||{},true,{inherited:state.settings})}${auto}`,"save",async data=>{
     const result=createdId?{id:createdId}:await api(channel?`/channels/${channel.id}`:"/channels",channel?"PUT":"POST",
       {name:data.get("name"),overrides:readPrefs(data),auto:data.has("auto"),description:data.get("description"),
         title_filter:data.get("titleFilter") ?? channel?.title_filter ?? "",
@@ -1033,7 +1034,7 @@ function openCatalog(source,channel) {
     ${channel?`<p class="note">${channel.title_filter?`${t("titleFilter")} · ${esc(channel.title_filter)}`:""}</p>`:
       `${field("name","","maxlength=100")}<label>${t("titleFilter")}<input id="catalog-rule" name="title_filter" placeholder="${t("titleExample")}" maxlength="120"></label>
       <details><summary>${t("overrides")}</summary><div class="stack">
-      ${prefs({},true)}${checked("auto",t("auto"),false)}<small>${t("autoNote")}</small></div></details>`}
+      ${prefs({},true,{inherited:state.settings})}${checked("auto",t("auto"),false)}<small>${t("autoNote")}</small></div></details>`}
     <div class="catalog-tools"><input type="search" id="catalog-q" aria-label="${t("scanSearch")}" placeholder="${t("scanSearch")}">
     <select id="catalog-kind" aria-label="${t("catalogFilter")}">${["all","videos","shorts","streams"].map(k=>option(k,t(k),"")).join("")}</select>
     ${btn("scan",t("refresh"),"","",source)}</div>

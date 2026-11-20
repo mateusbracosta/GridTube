@@ -7,7 +7,7 @@ English · [Português do Brasil](README.pt-BR.md)
 GridTube is a self-hosted video library for preserving YouTube videos and watching them offline. Download videos while connected, then browse and play your archive over your local network.
 
 - Browse a channel's videos, Shorts, live archives, and playlists before choosing what to download. Set a title rule and optionally follow new uploads.
-- Choose **Compact** or **Original quality** globally, by channel, or for a single link. Compact finds a smaller variant within your resolution limit. Original requests the best available resolution and frame rate. The main audio and video streams are copied from YouTube.
+- Set **Maximum resolution** globally, by channel, or for a single link. This limit applies to both **Compact** and **Original quality**. Compact finds a smaller variant at the best resolution and frame rate within the limit; Original follows the source's quality preference within the same limit. **Best available (no limit)** removes the resolution cap. The main audio and video streams are copied from YouTube.
 - Save preferred audio and subtitle languages. Find and download additional tracks from the player when the source offers them.
 - Organize videos into channels and playlists. The interface supports English and Brazilian Portuguese.
 

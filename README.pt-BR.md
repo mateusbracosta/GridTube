@@ -52,8 +52,8 @@ O Compose recria o container quando a configuração ou a imagem muda. A bibliot
 ## Uso
 
 - **Adicionar canal** consulta vídeos, Shorts e transmissões arquivadas. Em **Filtrar por playlist**, abra uma playlist do YouTube e selecione vídeos dela. **Carregar mais** e **Carregar todos** ampliam a lista. **Selecionar todos os resultados** cobre o filtro atual inteiro, inclusive itens ainda fora da lista visível. A seleção continua ao trocar de filtro ou playlist. **Título deve conter** define uma regra do canal, usada tanto na escolha manual quanto no acompanhamento automático. Os títulos são comparados sem distinção de caixa ou acentos.
-- **Preferências globais** são o padrão. Em cada canal, escolha modo de download, limite de resolução no modo compacto, política de Shorts, áudio e legendas. A política de Shorts vale para novas capturas automáticas, e a seleção manual sempre admite itens marcados. Ao ativar acompanhamento, a primeira consulta registra a referência sem enfileirar o histórico. O acompanhamento consulta até 30 itens recentes de cada aba por ciclo, a cada 15 minutos.
-- **Baixar por link** pode guardar em um canal ou em **Avulsos**. Em **Opções para este vídeo**, escolha modo de download, limite de resolução no modo compacto, áudio e legendas. Os campos deixados em **Usar padrão** herdam as preferências do canal ou os padrões globais. Em **Downloads**, use **Editar opções e tentar novamente** para ajustar uma tentativa que falhou. **Tentar novamente** reutiliza as escolhas individuais já feitas. Abra o menu de organização de um vídeo para mover a pasta para outro canal, criar um canal local e já mover o vídeo, ou criar/adicionar a uma playlist. Uma playlist aponta para o vídeo da biblioteca, com uma única cópia física.
+- **Preferências globais** são o padrão. Em cada canal, escolha modo de download, limite de resolução, política de Shorts, áudio e legendas. A política de Shorts vale para novas capturas automáticas, e a seleção manual sempre admite itens marcados. Ao ativar acompanhamento, a primeira consulta registra a referência sem enfileirar o histórico. O acompanhamento consulta até 30 itens recentes de cada aba por ciclo, a cada 15 minutos.
+- **Baixar por link** pode guardar em um canal ou em **Avulsos**. Em **Opções para este vídeo**, escolha modo de download, limite de resolução, áudio e legendas. Os campos deixados em **Usar padrão** herdam as preferências do canal ou os padrões globais. Em **Downloads**, use **Editar opções e tentar novamente** para ajustar uma tentativa que falhou. **Tentar novamente** reutiliza as escolhas individuais já feitas. Abra o menu de organização de um vídeo para mover a pasta para outro canal, criar um canal local e já mover o vídeo, ou criar/adicionar a uma playlist. Uma playlist aponta para o vídeo da biblioteca, com uma única cópia física.
 - **PT-BR / EN** alterna o idioma da interface naquele navegador. O player local oferece legendas, capítulos quando disponíveis e retomada de posição.
 
 Em canais locais, escolha **Ícone e cor** ao criar ou editar. Nas playlists criadas no app, use **Personalizar** no cabeçalho. As escolhas aparecem na barra lateral e nos cabeçalhos e são incluídas no backup do catálogo.
@@ -74,8 +74,11 @@ Em **Organizar vídeo → Excluir vídeo**, escolha **Remover da biblioteca** pa
 
 ### Modo de download
 
-- **Compacto** é o padrão. Dentro do limite configurado, o app encontra a melhor resolução e taxa de quadros disponíveis e prioriza o menor tamanho estimado entre as variantes comparáveis. A opção de resolução **Melhor disponível** mantém a seleção compacta sem fixar um teto.
-- **Qualidade original (máxima disponível)** seleciona a maior resolução e taxa de quadros disponíveis com a faixa de áudio escolhida. O app copia a imagem e o áudio fornecidos pelo YouTube em ambos os modos. A imagem corresponde à versão publicada na plataforma.
+- **Resolução máxima** vale para os dois modos. Pode ser definida globalmente, por canal ou por vídeo. Alterar apenas a resolução mantém o modo herdado. **Melhor disponível (sem limite)** remove o teto de resolução.
+- **Compacto** é o padrão. Dentro do limite configurado, o app encontra a melhor resolução e taxa de quadros disponíveis e prioriza o menor tamanho estimado entre as variantes comparáveis.
+- **Qualidade original** seleciona a maior resolução e taxa de quadros dentro do mesmo limite e segue a preferência de qualidade da origem nos formatos equivalentes. O app copia a imagem e o áudio fornecidos pelo YouTube em ambos os modos. A imagem corresponde à versão publicada na plataforma.
+
+A partir da 0.7.17, o limite também é respeitado em Qualidade original. Para baixar sem teto de resolução, escolha **Melhor disponível (sem limite)**. As escolhas são aplicadas às próximas capturas; os arquivos já salvos permanecem como foram baixados.
 
 ## Assistir
 
@@ -140,7 +143,7 @@ O GridTube atualiza os caminhos e as playlists após reconhecer uma movimentaç�
 Com o serviço parado, copie `data/` e a pasta do acervo para restaurar o estado completo. Guarde também `compose.yaml` e a imagem do app. No novo host, ajuste `GRIDTUBE_ARCHIVE_PATH` para apontar para a cópia do acervo. Depois de construir para a arquitetura do outro host, exporte e importe a imagem conforme abaixo.
 
 ~~~sh
-docker save -o gridtube-image.tar gridtube:0.7.16
+docker save -o gridtube-image.tar gridtube:0.7.17
 docker load -i gridtube-image.tar
 docker compose up -d --no-build --pull never
 ~~~

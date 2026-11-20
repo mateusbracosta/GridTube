@@ -463,7 +463,7 @@ def format_choice(formats, quality, language, mode, duration=None):
     usable = [fmt for fmt in formats if fmt.get("format_id") and not fmt.get("has_drm")]
     audio_only = [fmt for fmt in usable if fmt.get("vcodec") == "none" and fmt.get("acodec") not in {None, "none"}]
     video = [fmt for fmt in usable if fmt.get("vcodec") not in {None, "none"} and fmt.get("height")]
-    if mode == "compact" and quality != "best":
+    if quality != "best":
         video = [fmt for fmt in video if resolution(fmt)[0] <= int(quality)]
     muxed = [fmt for fmt in video if fmt.get("acodec") not in {None, "none"}]
     separate = [fmt for fmt in video if fmt.get("acodec") == "none"]
